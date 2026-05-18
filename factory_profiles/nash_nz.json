@@ -1,0 +1,41 @@
+{
+  "factory_name": "NASH NZ",
+  "currency": "NZD",
+  "machines": [
+    {
+      "id": "VMC_01",
+      "type": "VMC",
+      "axes": 3,
+      "work_envelope_mm": {"x": 500, "y": 400, "z": 300},
+      "max_spindle_rpm": 8000,
+      "achievable_Ra_um": 1.6,
+      "hourly_rate": 120.0
+    },
+    {
+      "id": "VMC_02",
+      "type": "VMC",
+      "axes": 4,
+      "work_envelope_mm": {"x": 600, "y": 500, "z": 400},
+      "max_spindle_rpm": 10000,
+      "achievable_Ra_um": 0.8,
+      "hourly_rate": 160.0
+    },
+    {
+      "id": "LATHE_01",
+      "type": "CNC_lathe",
+      "axes": 2,
+      "work_envelope_mm": {"x": 300, "y": 300, "z": 600},
+      "max_spindle_rpm": 4000,
+      "achievable_Ra_um": 0.8,
+      "hourly_rate": 95.0
+    }
+  ],
+  "materials_available": [
+    "aluminium_6061",
+    "mild_steel",
+    "stainless_316"
+  ],
+  "weekly_capacity_hours": 40,
+  "overhead_factor": 1.15,
+  "notes": "Example NASH NZ factory profile for RPP MVP validation"
+}

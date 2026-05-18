@@ -1,0 +1,22 @@
+{
+  "factory_name": "Generic 3-Axis Shop",
+  "currency": "NZD",
+  "machines": [
+    {
+      "id": "VMC_BASIC",
+      "type": "VMC",
+      "axes": 3,
+      "work_envelope_mm": {"x": 400, "y": 300, "z": 250},
+      "max_spindle_rpm": 6000,
+      "achievable_Ra_um": 3.2,
+      "hourly_rate": 90.0
+    }
+  ],
+  "materials_available": [
+    "aluminium_6061",
+    "mild_steel"
+  ],
+  "weekly_capacity_hours": 40,
+  "overhead_factor": 1.10,
+  "notes": "Minimal 3-axis shop for test coverage of REJECT cases"
+}
