@@ -7,6 +7,9 @@ data/processed/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 
+checkpoints/*
+!checkpoints/.gitkeep
+
 tests/fixtures/*.stp
 tests/fixtures/*.step
 !tests/fixtures/.gitkeep
