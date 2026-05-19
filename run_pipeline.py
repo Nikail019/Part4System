@@ -11,7 +11,7 @@ import time
 import tempfile
 
 
-DEFAULT_RESOLUTION = 64
+DEFAULT_RESOLUTION = 32
 DEFAULT_MATERIAL = "aluminium_6061"
 DEFAULT_CONFIDENCE = 0.5
 DEFAULT_SETUP_TIME = 15.0
@@ -29,7 +29,7 @@ PHASE_NAMES = {
 
 PHASE_OUTPUT_FILES = {
     1: ["voxel_64.npy", "metadata.json", "mesh.stl"],
-    2: ["features.json"],
+    2: ["features.json", "pmi_data.json"],
     3: ["setup_analysis.json", "accessibility_map.npy", "surface_mask.npy"],
     4: ["process_plan.json"],
     5: ["time_estimate.json"],
@@ -38,7 +38,7 @@ PHASE_OUTPUT_FILES = {
 
 PHASE_PATH_KEYS = {
     1: ["voxel_file", "metadata_file", "mesh_file"],
-    2: ["features_file"],
+    2: ["features_file", "pmi_data_file"],
     3: ["setup_analysis_file"],
     4: ["process_plan_file"],
     5: ["time_estimate_file"],
@@ -64,6 +64,11 @@ Examples:
     parser.add_argument("--material", default=DEFAULT_MATERIAL)
     parser.add_argument("--output", default=None)
     parser.add_argument("--model", default=None)
+    parser.add_argument(
+        "--device",
+        default=None,
+        help="Training device override: mps / cuda / cpu (default: auto)",
+    )
     parser.add_argument("--resolution", type=int, default=DEFAULT_RESOLUTION)
     parser.add_argument("--confidence", type=float, default=DEFAULT_CONFIDENCE)
     parser.add_argument("--resume-from", type=int, default=1, dest="resume_from", choices=range(1, 7))
@@ -78,7 +83,7 @@ def _resolve_output(args: argparse.Namespace) -> None:
         args.output = os.path.join("data", "processed", stem)
 
 
-def phase_is_complete(phase: int, output_dir: str, resolution: int = 64) -> bool:
+def phase_is_complete(phase: int, output_dir: str, resolution: int = DEFAULT_RESOLUTION) -> bool:
     for filename in PHASE_OUTPUT_FILES[phase]:
         actual = filename.replace("voxel_64.npy", f"voxel_{resolution}.npy")
         if not os.path.exists(os.path.join(output_dir, actual)):
@@ -120,6 +125,7 @@ def run_phase1(args: argparse.Namespace, paths: dict) -> dict:
 
 def run_phase2(args: argparse.Namespace, paths: dict) -> dict:
     from phase2_feature_recognition import recognise_features
+    from step_pmi_extractor import extract_pmi
 
     t0 = time.time()
     voxel_file = paths["voxel_file"]
@@ -136,10 +142,19 @@ def run_phase2(args: argparse.Namespace, paths: dict) -> dict:
         )
     result = recognise_features(voxel_file, model_used, threshold=args.confidence)
     _write_json_atomic(result, features_path)
+    pmi_result = extract_pmi(
+        args.step_file,
+        features_path,
+        args.output,
+        default_material=args.material,
+    )
+    warnings = list(pmi_result.get("warnings", []))
     return {
         "features_file": features_path,
+        "pmi_data_file": pmi_result["pmi_data_file"],
         "feature_count": result["feature_count"],
         "model_used": model_used,
+        "warnings": warnings,
         "duration_sec": round(time.time() - t0, 2),
     }
 
@@ -167,6 +182,7 @@ def run_phase4(args: argparse.Namespace, paths: dict) -> dict:
         paths["setup_analysis_file"],
         args.output,
         confidence_threshold=args.confidence,
+        pmi_data_path=paths.get("pmi_data_file"),
     )
     return {
         "process_plan_file": result["process_plan_file"],
@@ -254,6 +270,7 @@ def _collect_existing_paths(args: argparse.Namespace) -> dict:
         "metadata_file": os.path.join(output, "metadata.json"),
         "mesh_file": os.path.join(output, "mesh.stl"),
         "features_file": os.path.join(output, "features.json"),
+        "pmi_data_file": os.path.join(output, "pmi_data.json"),
         "setup_analysis_file": os.path.join(output, "setup_analysis.json"),
         "process_plan_file": os.path.join(output, "process_plan.json"),
         "time_estimate_file": os.path.join(output, "time_estimate.json"),
@@ -270,7 +287,10 @@ def _update_paths_from_cache(phase: int, args: argparse.Namespace, paths: dict) 
             "metadata_file": os.path.join(output, "metadata.json"),
             "mesh_file": os.path.join(output, "mesh.stl"),
         },
-        2: {"features_file": os.path.join(output, "features.json")},
+        2: {
+            "features_file": os.path.join(output, "features.json"),
+            "pmi_data_file": os.path.join(output, "pmi_data.json"),
+        },
         3: {"setup_analysis_file": os.path.join(output, "setup_analysis.json")},
         4: {"process_plan_file": os.path.join(output, "process_plan.json")},
         5: {"time_estimate_file": os.path.join(output, "time_estimate.json")},
@@ -284,6 +304,18 @@ def _read_json_if_exists(path: str) -> dict:
         return {}
     with open(path, encoding="utf-8") as f:
         return json.load(f)
+
+
+def _apply_pmi_material_override(args: argparse.Namespace, pmi_data_file: str | None) -> list[str]:
+    pmi_data = _read_json_if_exists(pmi_data_file)
+    if pmi_data.get("material_source") != "pmi":
+        return []
+    pmi_material = pmi_data.get("material")
+    if not pmi_material or pmi_material == args.material:
+        return []
+    warning = f"PMI material '{pmi_material}' overrides requested material '{args.material}'."
+    args.material = pmi_material
+    return [warning]
 
 
 def _build_summary(manifest: dict) -> dict:
@@ -322,6 +354,7 @@ def _phase_cached_result(phase: int, args: argparse.Namespace, paths: dict) -> d
         features = _read_json_if_exists(paths["features_file"])
         output = {
             "features_file": paths["features_file"],
+            "pmi_data_file": paths.get("pmi_data_file"),
             "feature_count": features.get("feature_count", 0),
             "model_used": features.get("model_path"),
         }
@@ -380,6 +413,11 @@ def run_pipeline(args: argparse.Namespace) -> dict:
             if not args.quiet:
                 print(f"  Phase {phase_num} [{phase_name}] - cached")
             phase_output = _phase_cached_result(phase_num, args, paths)
+            if phase_num == 2:
+                for warning in _apply_pmi_material_override(args, paths.get("pmi_data_file")):
+                    if warning not in warnings:
+                        warnings.append(warning)
+                manifest["material"] = args.material
             manifest["phase_outputs"][str(phase_num)] = phase_output
             manifest["phases_completed"].append(phase_num)
             continue
@@ -387,6 +425,14 @@ def run_pipeline(args: argparse.Namespace) -> dict:
         if not args.quiet:
             print(f"  Phase {phase_num} [{phase_name}] ...", end=" ", flush=True)
         phase_result = PHASE_RUNNERS[phase_num](args, paths)
+        for warning in phase_result.get("warnings", []):
+            if warning not in warnings:
+                warnings.append(warning)
+        if phase_num == 2:
+            for warning in _apply_pmi_material_override(args, phase_result.get("pmi_data_file")):
+                if warning not in warnings:
+                    warnings.append(warning)
+            manifest["material"] = args.material
         for key in PHASE_PATH_KEYS[phase_num]:
             if key in phase_result:
                 paths[key] = phase_result[key]

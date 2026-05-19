@@ -11,6 +11,7 @@ from pathlib import Path
 import torch
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
+from tqdm import tqdm
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -19,6 +20,17 @@ if str(ROOT) not in sys.path:
 from models.feature_net import FEATURE_NAMES, NUM_CLASSES, FeatureNet3D
 from training.augmentation import get_train_transforms, get_val_transforms
 from training.dataset import MachiningFeatureDataset, compute_class_weights, random_split_dataset
+
+
+def _get_device() -> str:
+    try:
+        if torch.backends.mps.is_available():
+            return "mps"
+    except AttributeError:
+        pass
+    if torch.cuda.is_available():
+        return "cuda"
+    return "cpu"
 
 
 class _TransformedSubset(Dataset):
@@ -100,11 +112,27 @@ def _print_per_class_report(model, loader, device, threshold: float = 0.5) -> di
     return report
 
 
-def _run_epoch(model, loader, criterion, optimiser, device, train: bool) -> float:
+def _run_epoch(
+    model,
+    loader,
+    criterion,
+    optimiser,
+    device,
+    train: bool,
+    epoch: int | None = None,
+    epochs: int | None = None,
+    quiet: bool = False,
+) -> float:
     model.train(train)
     total_loss = 0.0
     total_samples = 0
-    for x, y in loader:
+    iterator = loader
+    if train and not quiet:
+        desc = "train"
+        if epoch is not None and epochs is not None:
+            desc = f"Epoch {epoch:3d}/{epochs} train"
+        iterator = tqdm(loader, desc=desc, leave=False, unit="batch")
+    for x, y in iterator:
         x = x.to(device)
         y = y.to(device)
         if train:
@@ -116,6 +144,8 @@ def _run_epoch(model, loader, criterion, optimiser, device, train: bool) -> floa
             optimiser.step()
         total_loss += float(loss.item()) * x.shape[0]
         total_samples += x.shape[0]
+        if train and not quiet:
+            iterator.set_postfix(loss=f"{loss.item():.4f}")
     return total_loss / max(1, total_samples)
 
 
@@ -144,6 +174,8 @@ def _checkpoint_data(
             "class_weights": args.class_weights,
             "batch_size": args.batch,
             "learning_rate": args.lr,
+            "hidden_dim": args.hidden_dim,
+            "max_samples": args.max_samples,
             "num_classes": NUM_CLASSES,
             "feature_names": FEATURE_NAMES,
         },
@@ -161,7 +193,16 @@ def get_args() -> argparse.Namespace:
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--batch", type=int, default=32)
     parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--resolution", type=int, default=64)
+    parser.add_argument("--resolution", type=int, default=32)
+    parser.add_argument("--hidden-dim", type=int, default=256)
+    parser.add_argument("--max-samples", type=int, default=None)
+    parser.add_argument(
+        "--pre-warm",
+        action="store_true",
+        default=False,
+        dest="pre_warm",
+        help="Pre-compute voxel cache before training starts",
+    )
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--resume")
     parser.add_argument("--augment", action="store_true", default=True)
@@ -175,7 +216,16 @@ def get_args() -> argparse.Namespace:
 
 
 def train(args: argparse.Namespace) -> dict:
+    if args.pre_warm:
+        from scripts.prewarm_cache import prewarm
+
+        print("Pre-warming voxel cache...")
+        prewarm(args.data, args.resolution, args.max_samples)
+        print("Cache ready. Starting training.\n")
+
     dataset = MachiningFeatureDataset(args.data, resolution=args.resolution)
+    if args.max_samples is not None:
+        dataset.samples = dataset.samples[: args.max_samples]
     if len(dataset) == 0:
         raise RuntimeError(
             f"No valid parts found in {args.data}.\n"
@@ -187,12 +237,39 @@ def train(args: argparse.Namespace) -> dict:
     val_ds = _TransformedSubset(val_raw, get_val_transforms())
     test_ds = _TransformedSubset(test_raw, get_val_transforms())
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    train_loader = DataLoader(train_ds, batch_size=args.batch, shuffle=True, num_workers=args.workers)
-    val_loader = DataLoader(val_ds, batch_size=args.batch, shuffle=False, num_workers=args.workers)
-    test_loader = DataLoader(test_ds, batch_size=args.batch, shuffle=False, num_workers=args.workers)
+    device_name = _get_device()
+    if device_name == "mps" and args.workers > 0:
+        print("  Note: reducing workers to 0 for MPS stability")
+        args.workers = 0
+    device = torch.device(device_name)
+    pin = device_name == "cuda"
+    if not args.quiet:
+        print(f"Device: {device_name}")
+        print(f"Dataset: {len(dataset)} parts")
+        print(f"  Train: {len(train_ds)}  Val: {len(val_ds)}  Test: {len(test_ds)}")
+    train_loader = DataLoader(
+        train_ds,
+        batch_size=args.batch,
+        shuffle=True,
+        num_workers=args.workers,
+        pin_memory=pin,
+    )
+    val_loader = DataLoader(
+        val_ds,
+        batch_size=args.batch,
+        shuffle=False,
+        num_workers=args.workers,
+        pin_memory=False,
+    )
+    test_loader = DataLoader(
+        test_ds,
+        batch_size=args.batch,
+        shuffle=False,
+        num_workers=args.workers,
+        pin_memory=False,
+    )
 
-    model = FeatureNet3D(num_classes=NUM_CLASSES).to(device)
+    model = FeatureNet3D(num_classes=NUM_CLASSES, hidden_dim=args.hidden_dim).to(device)
     if args.class_weights:
         weights = compute_class_weights(dataset).to(device)
         criterion = nn.BCEWithLogitsLoss(pos_weight=weights)
@@ -222,7 +299,17 @@ def train(args: argparse.Namespace) -> dict:
     history = []
     epochs_no_improve = 0
     for epoch in range(start_epoch, args.epochs + 1):
-        train_loss = _run_epoch(model, train_loader, criterion, optimiser, device, train=True)
+        train_loss = _run_epoch(
+            model,
+            train_loader,
+            criterion,
+            optimiser,
+            device,
+            train=True,
+            epoch=epoch,
+            epochs=args.epochs,
+            quiet=args.quiet,
+        )
         with torch.no_grad():
             val_loss = _run_epoch(model, val_loader, criterion, optimiser, device, train=False)
         val_f1 = _compute_f1(model, val_loader, device)
@@ -231,13 +318,12 @@ def train(args: argparse.Namespace) -> dict:
 
         data = _checkpoint_data(args, epoch, model, optimiser, val_loss, val_f1, best_val_loss, best_val_f1)
         _save_checkpoint(out_dir / "last.pt", data)
-        if val_f1 > best_val_f1:
+        improved = val_f1 > best_val_f1
+        if improved:
             best_val_f1 = val_f1
             epochs_no_improve = 0
             data = _checkpoint_data(args, epoch, model, optimiser, val_loss, val_f1, best_val_loss, best_val_f1)
             _save_checkpoint(out_dir / "best.pt", data)
-            if not args.quiet:
-                print(f"  New best F1={val_f1:.4f}")
         else:
             epochs_no_improve += 1
 
@@ -245,8 +331,11 @@ def train(args: argparse.Namespace) -> dict:
         history.append(row)
         if not args.quiet:
             print(
-                f"epoch={epoch} train_loss={train_loss:.4f} "
-                f"val_loss={val_loss:.4f} val_F1={val_f1:.4f}"
+                f"Epoch {epoch:3d}/{args.epochs} | "
+                f"train={train_loss:.4f} | "
+                f"val={val_loss:.4f} | "
+                f"F1={val_f1:.4f}"
+                + (" best" if improved else "")
             )
 
         if epoch >= args.min_epochs and epochs_no_improve >= args.early_stop:

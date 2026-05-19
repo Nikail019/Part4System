@@ -153,7 +153,22 @@ def generate_dataset(output_dir: str, count: int = 2000) -> None:
     """Generate labelled STEP parts into output_dir."""
     root = Path(output_dir)
     root.mkdir(parents=True, exist_ok=True)
+    manifest_path = root / "manifest.json"
+    existing_manifest = {}
+    if manifest_path.exists():
+        with manifest_path.open(encoding="utf-8") as f:
+            existing_manifest = json.load(f)
+
     distribution = {name: 0 for name in FEATURE_NAMES}
+    distribution.update(existing_manifest.get("classes", {}))
+    existing_dirs = [
+        int(path.name)
+        for path in root.iterdir()
+        if path.is_dir() and path.name.isdigit()
+    ]
+    start_idx = max(existing_dirs, default=-1) + 1
+    existing_total = int(existing_manifest.get("total_files", existing_manifest.get("total", start_idx)))
+    previous_attempts = int(existing_manifest.get("attempts", 0))
     generated = 0
     attempts = 0
 
@@ -162,7 +177,7 @@ def generate_dataset(output_dir: str, count: int = 2000) -> None:
             attempts += 1
             try:
                 part, labels = generate_part()
-                part_dir = root / f"{generated:05d}"
+                part_dir = root / f"{start_idx + generated:05d}"
                 part_dir.mkdir(parents=True, exist_ok=True)
                 cq.exporters.export(part, str(part_dir / "part.stp"), exportType="STEP")
                 _write_labels(part_dir / "labels.json", labels)
@@ -174,13 +189,16 @@ def generate_dataset(output_dir: str, count: int = 2000) -> None:
             generated += 1
             progress.update(1)
 
+    total = existing_total + generated
     manifest = {
-        "total": generated,
-        "attempts": attempts,
+        "total": total,
+        "total_files": total,
+        "generated_this_run": generated,
+        "attempts": previous_attempts + attempts,
         "date": date.today().isoformat(),
         "classes": distribution,
     }
-    with (root / "manifest.json").open("w", encoding="utf-8") as f:
+    with manifest_path.open("w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2)
         f.write("\n")
 

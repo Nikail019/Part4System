@@ -29,8 +29,15 @@ FEATURE_TO_IDX = {name: idx for idx, name in enumerate(FEATURE_NAMES)}
 class FeatureNet3D(nn.Module):
     """3D CNN for multi-label machining feature recognition."""
 
-    def __init__(self, num_classes: int = NUM_CLASSES, dropout: float = 0.5):
+    def __init__(
+        self,
+        num_classes: int = NUM_CLASSES,
+        dropout: float = 0.5,
+        hidden_dim: int = 256,
+    ):
         super().__init__()
+        self.num_classes = num_classes
+        self.hidden_dim = hidden_dim
         self.features = nn.Sequential(
             nn.Conv3d(1, 32, kernel_size=3, padding=1),
             nn.BatchNorm3d(32),
@@ -47,11 +54,11 @@ class FeatureNet3D(nn.Module):
         )
         self.classifier = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(128 * 4 * 4 * 4, 512),
-            nn.BatchNorm1d(512),
+            nn.Linear(128 * 4 * 4 * 4, hidden_dim),
+            nn.BatchNorm1d(hidden_dim),
             nn.ReLU(inplace=True),
             nn.Dropout(dropout),
-            nn.Linear(512, num_classes),
+            nn.Linear(hidden_dim, num_classes),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -68,9 +75,11 @@ def load_model(
     if not os.path.exists(checkpoint_path):
         raise FileNotFoundError(checkpoint_path)
 
-    model = FeatureNet3D(num_classes=num_classes)
     checkpoint = torch.load(checkpoint_path, map_location=device)
     state_dict = checkpoint.get("model_state_dict", checkpoint)
+    config = checkpoint.get("training_config", {})
+    hidden_dim = int(config.get("hidden_dim", state_dict["classifier.1.weight"].shape[0]))
+    model = FeatureNet3D(num_classes=num_classes, hidden_dim=hidden_dim)
     model.load_state_dict(state_dict)
     model.to(device)
     model.eval()

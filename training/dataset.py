@@ -105,7 +105,7 @@ def compute_class_weights(dataset) -> torch.Tensor:
         for _, y in dataset:
             counts += y.float()
 
-    pos_freq = counts / float(total)
-    weights = 1.0 / (pos_freq + 1e-6)
-    weights = weights / weights.mean()
+    negatives = float(total) - counts
+    weights = negatives / counts.clamp_min(1.0)
+    weights = weights.clamp_min(0.1)
     return weights.float()

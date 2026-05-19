@@ -21,6 +21,17 @@ from models.feature_net import FEATURE_NAMES, NUM_CLASSES, load_model
 from training.dataset import MachiningFeatureDataset, random_split_dataset
 
 
+def _get_device() -> str:
+    try:
+        if torch.backends.mps.is_available():
+            return "mps"
+    except AttributeError:
+        pass
+    if torch.cuda.is_available():
+        return "cuda"
+    return "cpu"
+
+
 def compute_multilabel_confusion(
     preds: torch.Tensor,
     targets: torch.Tensor,
@@ -53,18 +64,29 @@ def _metrics_from_predictions(preds: torch.Tensor, targets: torch.Tensor) -> tup
     return per_class, float(precision.mean()), float(recall.mean()), float(f1.mean())
 
 
-def evaluate(model_path: str, data_path: str, out_dir: str, threshold: float = 0.5, resolution: int = 64) -> dict:
+def evaluate(
+    model_path: str,
+    data_path: str,
+    out_dir: str,
+    threshold: float = 0.5,
+    resolution: int = 32,
+    device: str | None = None,
+    max_samples: int | None = 1000,
+) -> dict:
     dataset = MachiningFeatureDataset(data_path, resolution=resolution)
+    if max_samples is not None:
+        dataset.samples = dataset.samples[:max_samples]
     _, _, test_ds = random_split_dataset(dataset)
     loader = DataLoader(test_ds, batch_size=16, shuffle=False, num_workers=0)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = load_model(model_path, device=device)
+    device_name = device if device else _get_device()
+    torch_device = torch.device(device_name)
+    model = load_model(model_path, device=torch_device)
 
     all_preds = []
     all_targets = []
     with torch.no_grad():
         for x, y in loader:
-            probs = torch.sigmoid(model(x.to(device))).cpu()
+            probs = torch.sigmoid(model(x.to(torch_device))).cpu()
             all_preds.append((probs >= threshold).float())
             all_targets.append(y.float())
 
@@ -86,6 +108,9 @@ def evaluate(model_path: str, data_path: str, out_dir: str, threshold: float = 0
         "model_path": os.path.abspath(model_path),
         "data_path": os.path.abspath(data_path),
         "threshold": threshold,
+        "resolution": resolution,
+        "device": device_name,
+        "max_samples": max_samples,
         "test_samples": len(test_ds),
         "macro_f1": macro_f1,
         "macro_precision": macro_precision,
@@ -106,9 +131,25 @@ def main() -> None:
     parser.add_argument("--data", required=True)
     parser.add_argument("--out", default=os.path.join("checkpoints", "eval"))
     parser.add_argument("--threshold", type=float, default=0.5)
-    parser.add_argument("--resolution", type=int, default=64)
+    parser.add_argument("--resolution", type=int, default=32)
+    parser.add_argument("--max-samples", type=int, default=1000)
+    parser.add_argument(
+        "--device",
+        default=None,
+        help="Device override: mps / cuda / cpu (default: auto-detect)",
+    )
     args = parser.parse_args()
-    report = evaluate(args.model, args.data, args.out, args.threshold, args.resolution)
+    device = args.device if args.device else _get_device()
+    print(f"Device: {device}")
+    report = evaluate(
+        args.model,
+        args.data,
+        args.out,
+        args.threshold,
+        args.resolution,
+        device,
+        args.max_samples,
+    )
     print(json.dumps(report, indent=2))
 
 

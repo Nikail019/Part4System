@@ -122,7 +122,8 @@ def test_checkpoint_contains_training_config(tmp_path):
         "model_state_dict": model.state_dict(),
         "val_f1": 0.0,
         "training_config": {
-            "resolution": 64,
+            "resolution": 32,
+            "hidden_dim": 256,
             "num_classes": NUM_CLASSES,
             "feature_names": ["flat_face"],
         },
@@ -131,4 +132,21 @@ def test_checkpoint_contains_training_config(tmp_path):
     torch.save(checkpoint, path)
     loaded = torch.load(path, map_location="cpu")
     assert "training_config" in loaded
-    assert loaded["training_config"]["resolution"] == 64
+    assert loaded["training_config"]["resolution"] == 32
+    assert loaded["training_config"]["hidden_dim"] == 256
+
+
+def test_load_model_uses_hidden_dim_from_checkpoint(tmp_path):
+    from models.feature_net import FeatureNet3D, load_model
+
+    model = FeatureNet3D(hidden_dim=128)
+    path = tmp_path / "model.pt"
+    torch.save(
+        {
+            "model_state_dict": model.state_dict(),
+            "training_config": {"hidden_dim": 128},
+        },
+        path,
+    )
+    loaded = load_model(str(path))
+    assert loaded.hidden_dim == 128

@@ -31,7 +31,7 @@ def _load_feature_types(output_dir: str) -> list[str]:
 
 
 CHECKS = [
-    ("phase1", "voxel_64.npy exists", lambda d: os.path.exists(os.path.join(d, "voxel_64.npy"))),
+    ("phase1", "voxel_32.npy exists", lambda d: os.path.exists(os.path.join(d, "voxel_32.npy"))),
     ("phase2", "flat_face always detected", lambda d: "flat_face" in _load_feature_types(d)),
     ("phase2", "at least 1 feature detected", lambda d: _load_json(d, "features.json").get("feature_count", 0) >= 1),
     ("phase3", "valid setup count", lambda d: _load_json(d, "setup_analysis.json").get("setup_count", 0) >= 1),
