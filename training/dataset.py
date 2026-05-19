@@ -87,3 +87,25 @@ def random_split_dataset(dataset, train_frac: float = 0.80, val_frac: float = 0.
     test_size = total - train_size - val_size
     generator = torch.Generator().manual_seed(seed)
     return random_split(dataset, [train_size, val_size, test_size], generator=generator)
+
+
+def compute_class_weights(dataset) -> torch.Tensor:
+    """Compute normalized inverse-frequency positive weights per class."""
+    counts = torch.zeros(NUM_CLASSES, dtype=torch.float32)
+    total = len(dataset)
+    if total == 0:
+        return torch.ones(NUM_CLASSES, dtype=torch.float32)
+
+    if hasattr(dataset, "samples"):
+        for sample in dataset.samples:
+            for label in sample.get("labels", []):
+                if label in FEATURE_TO_IDX:
+                    counts[FEATURE_TO_IDX[label]] += 1.0
+    else:
+        for _, y in dataset:
+            counts += y.float()
+
+    pos_freq = counts / float(total)
+    weights = 1.0 / (pos_freq + 1e-6)
+    weights = weights / weights.mean()
+    return weights.float()

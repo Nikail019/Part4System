@@ -12,8 +12,8 @@ from run_pipeline import (
     PHASE_OUTPUT_FILES,
     _build_summary,
     _collect_existing_paths,
-    _default_features,
     _load_or_create_manifest,
+    _resolve_model_path,
     _update_paths_from_cache,
     dry_run,
     phase_is_complete,
@@ -72,29 +72,37 @@ def test_phase_is_complete_false_partial(tmp_path):
     assert not phase_is_complete(1, str(tmp_path))
 
 
-def test_default_features_schema():
-    result = _default_features(0.5)
-    assert "features" in result
-    assert "feature_count" in result
-    assert "all_scores" in result
+def test_resolve_model_explicit(tmp_path):
+    ckpt = tmp_path / "my_model.pt"
+    ckpt.write_text("dummy")
+    args = make_args(model=str(ckpt))
+    assert _resolve_model_path(args) == str(ckpt.resolve())
 
 
-def test_default_features_includes_flat_face():
-    result = _default_features(0.5)
-    assert "flat_face" in [feature["type"] for feature in result["features"]]
+def test_resolve_model_auto_detects_best_pt(tmp_path, monkeypatch):
+    import run_pipeline
+
+    ckpt = tmp_path / "best.pt"
+    ckpt.write_text("dummy")
+    monkeypatch.setattr(run_pipeline, "DEFAULT_CHECKPOINT", str(ckpt))
+    args = make_args(model=None)
+    resolved = _resolve_model_path(args)
+    assert resolved is not None
+    assert "best.pt" in resolved
 
 
-def test_default_features_all_scores_has_all_classes():
-    from models.feature_net import FEATURE_NAMES
+def test_resolve_model_returns_none_when_missing(monkeypatch):
+    import run_pipeline
 
-    result = _default_features(0.5)
-    for name in FEATURE_NAMES:
-        assert name in result["all_scores"]
+    monkeypatch.setattr(run_pipeline, "DEFAULT_CHECKPOINT", "/no/such/path.pt")
+    args = make_args(model=None)
+    assert _resolve_model_path(args) is None
 
 
-def test_default_features_model_path_is_fallback():
-    result = _default_features(0.5)
-    assert result["model_path"] == "fallback_no_model"
+def test_default_features_removed():
+    import run_pipeline
+
+    assert not hasattr(run_pipeline, "_default_features")
 
 
 def test_build_summary_extracts_recommendation():
@@ -263,13 +271,20 @@ def test_print_summary_reject_shows_flags(capsys):
 )
 def test_full_pipeline_simple_block(tmp_path):
     from run_pipeline import run_pipeline
+    import torch
+    from models.feature_net import FeatureNet3D, NUM_CLASSES
 
+    ckpt = tmp_path / "model.pt"
+    model = FeatureNet3D(num_classes=NUM_CLASSES)
+    model.eval()
+    torch.save({"model_state_dict": model.state_dict()}, ckpt)
     args = make_args(
         step_file=STP_FILE,
         factory_profile=FACTORY,
         material="aluminium_6061",
         output=str(tmp_path),
-        model=None,
+        model=str(ckpt),
+        confidence=0.0,
         quiet=True,
     )
     manifest = run_pipeline(args)
@@ -289,8 +304,21 @@ def test_full_pipeline_simple_block(tmp_path):
 )
 def test_resume_skips_completed_phases(tmp_path):
     from run_pipeline import run_pipeline
+    import torch
+    from models.feature_net import FeatureNet3D, NUM_CLASSES
 
-    args = make_args(step_file=STP_FILE, factory_profile=FACTORY, output=str(tmp_path), quiet=True)
+    ckpt = tmp_path / "model.pt"
+    model = FeatureNet3D(num_classes=NUM_CLASSES)
+    model.eval()
+    torch.save({"model_state_dict": model.state_dict()}, ckpt)
+    args = make_args(
+        step_file=STP_FILE,
+        factory_profile=FACTORY,
+        output=str(tmp_path),
+        model=str(ckpt),
+        confidence=0.0,
+        quiet=True,
+    )
     run_pipeline(args)
     manifest2 = run_pipeline(args)
     assert len(manifest2["phases_completed"]) == 6

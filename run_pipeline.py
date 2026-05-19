@@ -16,6 +16,7 @@ DEFAULT_MATERIAL = "aluminium_6061"
 DEFAULT_CONFIDENCE = 0.5
 DEFAULT_SETUP_TIME = 15.0
 DEFAULT_TOOL_CHANGE = 2.0
+DEFAULT_CHECKPOINT = "checkpoints/best.pt"
 
 PHASE_NAMES = {
     1: "STEP -> Voxel",
@@ -95,19 +96,12 @@ def _write_json_atomic(data: dict, path: str) -> None:
     os.replace(tmp, path)
 
 
-def _default_features(threshold: float) -> dict:
-    from models.feature_net import FEATURE_NAMES
-
-    all_scores = {name: 0.1 for name in FEATURE_NAMES}
-    all_scores["flat_face"] = 0.99
-    return {
-        "features": [{"type": "flat_face", "confidence": 0.99}],
-        "feature_count": 1,
-        "all_scores": all_scores,
-        "threshold": threshold,
-        "voxel_file": "",
-        "model_path": "fallback_no_model",
-    }
+def _resolve_model_path(args: argparse.Namespace) -> str | None:
+    if args.model and os.path.exists(args.model):
+        return os.path.abspath(args.model)
+    if os.path.exists(DEFAULT_CHECKPOINT):
+        return os.path.abspath(DEFAULT_CHECKPOINT)
+    return None
 
 
 def run_phase1(args: argparse.Namespace, paths: dict) -> dict:
@@ -130,13 +124,17 @@ def run_phase2(args: argparse.Namespace, paths: dict) -> dict:
     t0 = time.time()
     voxel_file = paths["voxel_file"]
     features_path = os.path.join(os.path.abspath(args.output), "features.json")
-    if args.model and os.path.exists(args.model):
-        result = recognise_features(voxel_file, args.model, threshold=args.confidence)
-        model_used = os.path.abspath(args.model)
-    else:
-        result = _default_features(args.confidence)
-        result["voxel_file"] = os.path.abspath(voxel_file)
-        model_used = None
+    model_used = _resolve_model_path(args)
+    if model_used is None:
+        raise FileNotFoundError(
+            "No trained model checkpoint found.\n"
+            "Train the model first:\n"
+            "  python training/synthetic_data_gen.py --count 2000\n"
+            "  python training/train_feature_net.py --data data/raw/synthetic "
+            "--out checkpoints --epochs 30\n"
+            "Or specify a checkpoint with --model path/to/model.pt"
+        )
+    result = recognise_features(voxel_file, model_used, threshold=args.confidence)
     _write_json_atomic(result, features_path)
     return {
         "features_file": features_path,
@@ -393,15 +391,6 @@ def run_pipeline(args: argparse.Namespace) -> dict:
             if key in phase_result:
                 paths[key] = phase_result[key]
 
-        if phase_num == 2 and phase_result.get("model_used") is None:
-            warning = (
-                "No trained model found. Phase 2 used fallback feature set "
-                "(flat_face only). Train a model with: python training/train_feature_net.py"
-            )
-            warnings.append(warning)
-            if not args.quiet:
-                print(f"\n    WARNING: {warning}", end=" ")
-
         duration = phase_result.get("duration_sec", 0.0)
         if not args.quiet:
             print(f"done ({duration:.2f}s)")
@@ -463,7 +452,8 @@ def dry_run(args: argparse.Namespace) -> None:
     print(f"  Factory profile  : {args.factory_profile}")
     print(f"  Material         : {args.material}")
     print(f"  Output dir       : {args.output}")
-    print(f"  Model checkpoint : {args.model or '(none - fallback will be used)'}")
+    model_path = _resolve_model_path(args)
+    print(f"  Model checkpoint : {model_path or '(none - run training first)'}")
     print(f"  Voxel resolution : {args.resolution}^3")
     print(f"  Confidence       : {args.confidence}")
     print(f"  Resume from      : Phase {args.resume_from}")
