@@ -102,6 +102,8 @@ def test_feature_overlay_conversion_has_viewer_bbox():
                 "type": "rectangular_pocket",
                 "instance_id": 2,
                 "confidence": 0.91,
+                "localisation_status": "localised",
+                "volume_voxels": 120,
                 "bbox_voxel": [[24, 22, 44], [40, 36, 60]],
                 "centroid_voxel": [32, 29, 52],
                 "primary_direction": "+Z",
@@ -118,3 +120,23 @@ def test_feature_overlay_conversion_has_viewer_bbox():
     assert overlay["instance_id"] == 2
     assert len(overlay["bbox_center"]) == 3
     assert all(value > 0 for value in overlay["bbox_size"])
+
+
+def test_feature_overlay_skips_estimated_fallback_instances():
+    from web_app import _feature_overlays
+
+    metadata = {"bounding_box_mm": {"x": 50.0, "y": 50.0, "z": 50.0}}
+    feature_instances = {
+        "instances": [
+            {
+                "type": "rectangular_pocket",
+                "instance_id": 0,
+                "confidence": 0.99,
+                "localisation_status": "estimated",
+                "volume_voxels": 0,
+                "bbox_voxel": [[0, 0, 0], [31, 31, 31]],
+            }
+        ]
+    }
+
+    assert _feature_overlays(feature_instances, metadata, (32, 32, 32)) == []

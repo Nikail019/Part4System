@@ -28,7 +28,7 @@ STATIC_DIR = ROOT / "web" / "static"
 JOB_STATUS_FILE = "job_status.json"
 SAFE_JOB_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 ARTIFACT_EXTENSIONS = {".json", ".npy", ".stl", ".txt"}
-MAX_VIEWER_POINTS = 6000
+MAX_VIEWER_POINTS = 2500
 VIEWER_SAMPLE_SEED = 42
 FEATURE_COLORS = {
     "through_hole": "#5aa9ff",
@@ -204,6 +204,10 @@ def _feature_overlays(feature_instances: dict, metadata: dict, voxel_shape: tupl
     transform = _viewer_transform(metadata, voxel_shape)
     overlays = []
     for instance in feature_instances.get("instances", []):
+        if instance.get("localisation_status") != "localised":
+            continue
+        if int(instance.get("volume_voxels", 0)) <= 0:
+            continue
         bbox = instance.get("bbox_voxel")
         if not isinstance(bbox, list) or len(bbox) != 2:
             continue

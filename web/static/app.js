@@ -8,7 +8,7 @@ const state = {
   viewerData: null,
   meshVisible: true,
   voxelsVisible: false,
-  surfaceVisible: true,
+  surfaceVisible: false,
   featuresVisible: true,
   meshObject: null,
   voxelObject: null,
@@ -177,6 +177,9 @@ async function loadMesh(jobId, meshUrl) {
           roughness: 0.55,
           transparent: true,
           opacity: 0.42,
+          polygonOffset: true,
+          polygonOffsetFactor: 1,
+          polygonOffsetUnits: 1,
           depthWrite: false,
         });
         const mesh = new THREE.Mesh(geometry, material);
@@ -201,11 +204,11 @@ async function renderViewer(data) {
   state.featureObject = null;
   state.approachObject = null;
 
-  state.voxelObject = pointsToCloud(data.voxel_points, 0x54b7a7, 0.8, 0.22);
+  state.voxelObject = pointsToCloud(data.voxel_points, 0x54b7a7, 0.55, 0.14);
   state.voxelObject.visible = state.voxelsVisible;
   scene.add(state.voxelObject);
 
-  state.surfaceObject = pointsToCloud(data.surface_points, 0x65d6c6, 1.25, 0.88);
+  state.surfaceObject = pointsToCloud(data.surface_points, 0x7da6ff, 0.85, 0.58);
   state.surfaceObject.visible = state.surfaceVisible;
   scene.add(state.surfaceObject);
 
@@ -228,8 +231,8 @@ async function renderViewer(data) {
     bbox.getCenter(center);
     bbox.getSize(size);
     controls.target.copy(center);
-    const radius = Math.max(size.x, size.y, size.z, 60);
-    camera.position.set(center.x + radius * 0.9, center.y - radius * 1.2, center.z + radius * 0.8);
+    const radius = Math.max(size.x, size.y, size.z, 60) * 1.65;
+    camera.position.set(center.x + radius * 0.95, center.y - radius * 1.25, center.z + radius * 0.9);
     camera.near = Math.max(0.1, radius / 1000);
     camera.far = radius * 20;
     camera.updateProjectionMatrix();
