@@ -18,7 +18,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from models.feature_net import FEATURE_NAMES, FEATURE_TO_IDX, NUM_CLASSES
+from models.feature_net import FEATURE_NAMES
+
+EXCLUDED_TRAINING_FEATURES = {"chamfer", "fillet"}
+ACTIVE_SYNTHETIC_FEATURES = [
+    name for name in FEATURE_NAMES if name not in EXCLUDED_TRAINING_FEATURES
+]
 
 
 def make_base_block() -> tuple:
@@ -128,12 +133,33 @@ FEATURE_ADDERS = {
 }
 
 
-def generate_part(min_features: int = 1, max_features: int = 4) -> tuple:
-    """Build a random labelled part."""
+def generate_part(
+    min_features: int = 0,
+    max_features: int = 4,
+    target_feature: str | None = None,
+    extra_feature_chance: float = 0.25,
+) -> tuple:
+    """Build a random labelled part with optional class targeting."""
     wp, block = make_base_block()
     labels = ["flat_face"]
-    candidates = [name for name in FEATURE_NAMES if name != "flat_face"]
-    chosen = random.sample(candidates, k=random.randint(min_features, max_features))
+    candidates = [name for name in ACTIVE_SYNTHETIC_FEATURES if name != "flat_face"]
+    if target_feature in EXCLUDED_TRAINING_FEATURES:
+        target_feature = "flat_face"
+
+    chosen: list[str] = []
+    if target_feature and target_feature != "flat_face":
+        chosen.append(target_feature)
+
+    if target_feature is None:
+        chosen.extend(random.sample(candidates, k=random.randint(min_features, max_features)))
+    elif target_feature != "flat_face" and random.random() < extra_feature_chance:
+        extras = [name for name in candidates if name != target_feature]
+        extra_count = random.randint(0, max(0, min(max_features - 1, 2)))
+        chosen.extend(random.sample(extras, k=extra_count))
+    elif target_feature == "flat_face" and min_features > 0:
+        chosen.extend(random.sample(candidates, k=random.randint(min_features, max_features)))
+
+    chosen = list(dict.fromkeys(chosen))
     for feature in chosen:
         try:
             wp = FEATURE_ADDERS[feature](wp, block)
@@ -149,7 +175,7 @@ def _write_labels(path: Path, labels: list[str]) -> None:
         f.write("\n")
 
 
-def generate_dataset(output_dir: str, count: int = 2000) -> None:
+def generate_dataset(output_dir: str, count: int = 2000, balanced: bool = True) -> None:
     """Generate labelled STEP parts into output_dir."""
     root = Path(output_dir)
     root.mkdir(parents=True, exist_ok=True)
@@ -176,7 +202,14 @@ def generate_dataset(output_dir: str, count: int = 2000) -> None:
         while generated < count and attempts < count * 5:
             attempts += 1
             try:
-                part, labels = generate_part()
+                target = (
+                    ACTIVE_SYNTHETIC_FEATURES[
+                        (start_idx + generated) % len(ACTIVE_SYNTHETIC_FEATURES)
+                    ]
+                    if balanced
+                    else None
+                )
+                part, labels = generate_part(target_feature=target)
                 part_dir = root / f"{start_idx + generated:05d}"
                 part_dir.mkdir(parents=True, exist_ok=True)
                 cq.exporters.export(part, str(part_dir / "part.stp"), exportType="STEP")
@@ -196,6 +229,9 @@ def generate_dataset(output_dir: str, count: int = 2000) -> None:
         "generated_this_run": generated,
         "attempts": previous_attempts + attempts,
         "date": date.today().isoformat(),
+        "balanced": balanced,
+        "active_features": ACTIVE_SYNTHETIC_FEATURES,
+        "excluded_features": sorted(EXCLUDED_TRAINING_FEATURES),
         "classes": distribution,
     }
     with manifest_path.open("w", encoding="utf-8") as f:
@@ -207,8 +243,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Generate synthetic STEP training data.")
     parser.add_argument("--output", default=os.path.join("data", "raw", "synthetic"))
     parser.add_argument("--count", type=int, default=2000)
+    parser.add_argument("--balanced", action="store_true", default=True)
+    parser.add_argument("--random", action="store_false", dest="balanced")
     args = parser.parse_args()
-    generate_dataset(args.output, args.count)
+    generate_dataset(args.output, args.count, balanced=args.balanced)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,143 @@
+{
+  "total_time_min": 90.60013649425288,
+  "machining_time_min": 46.60013649425288,
+  "setup_time_min": 30.0,
+  "breakdown": [
+    {
+      "step": 1,
+      "operation_type": "face_mill_rough",
+      "feature_type": "flat_face",
+      "phase": "roughing",
+      "estimated_removal_volume_mm3": 10538.793103448277,
+      "mrr_mm3_per_min": 8000.0,
+      "machining_time_min": 1.3173491379310347,
+      "tool_change_time_min": 2.0,
+      "operation_time_min": 3.3173491379310347
+    },
+    {
+      "step": 2,
+      "operation_type": "endmill_rough",
+      "feature_type": "boss",
+      "phase": "roughing",
+      "estimated_removal_volume_mm3": 52693.965517241384,
+      "mrr_mm3_per_min": 5000.0,
+      "machining_time_min": 10.538793103448278,
+      "tool_change_time_min": 2.0,
+      "operation_time_min": 12.538793103448278
+    },
+    {
+      "step": 3,
+      "operation_type": "endmill_rough",
+      "feature_type": "circular_pocket",
+      "phase": "roughing",
+      "estimated_removal_volume_mm3": 25293.103448275862,
+      "mrr_mm3_per_min": 5000.0,
+      "machining_time_min": 5.058620689655172,
+      "tool_change_time_min": 0.0,
+      "operation_time_min": 5.058620689655172
+    },
+    {
+      "step": 4,
+      "operation_type": "endmill_rough",
+      "feature_type": "circular_slot",
+      "phase": "roughing",
+      "estimated_removal_volume_mm3": 21077.586206896554,
+      "mrr_mm3_per_min": 5000.0,
+      "machining_time_min": 4.2155172413793105,
+      "tool_change_time_min": 0.0,
+      "operation_time_min": 4.2155172413793105
+    },
+    {
+      "step": 5,
+      "operation_type": "centre_drill",
+      "feature_type": "blind_hole",
+      "phase": "roughing",
+      "estimated_removal_volume_mm3": 6323.275862068966,
+      "mrr_mm3_per_min": 500.0,
+      "machining_time_min": 12.64655172413793,
+      "tool_change_time_min": 2.0,
+      "operation_time_min": 14.64655172413793
+    },
+    {
+      "step": 6,
+      "operation_type": "drill_peck",
+      "feature_type": "blind_hole",
+      "phase": "roughing",
+      "estimated_removal_volume_mm3": 6323.275862068966,
+      "mrr_mm3_per_min": 2000.0,
+      "machining_time_min": 3.1616379310344827,
+      "tool_change_time_min": 2.0,
+      "operation_time_min": 5.161637931034482
+    },
+    {
+      "step": 7,
+      "operation_type": "face_mill_finish",
+      "feature_type": "flat_face",
+      "phase": "finishing",
+      "estimated_removal_volume_mm3": 3720.0,
+      "mrr_mm3_per_min": 2000.0,
+      "machining_time_min": 1.86,
+      "tool_change_time_min": 2.0,
+      "operation_time_min": 3.8600000000000003
+    },
+    {
+      "step": 8,
+      "operation_type": "endmill_finish",
+      "feature_type": "boss",
+      "phase": "finishing",
+      "estimated_removal_volume_mm3": 1860.0,
+      "mrr_mm3_per_min": 800.0,
+      "machining_time_min": 2.325,
+      "tool_change_time_min": 2.0,
+      "operation_time_min": 4.325
+    },
+    {
+      "step": 9,
+      "operation_type": "endmill_finish",
+      "feature_type": "circular_pocket",
+      "phase": "finishing",
+      "estimated_removal_volume_mm3": 1488.0,
+      "mrr_mm3_per_min": 800.0,
+      "machining_time_min": 1.86,
+      "tool_change_time_min": 0.0,
+      "operation_time_min": 1.86
+    },
+    {
+      "step": 10,
+      "operation_type": "endmill_finish",
+      "feature_type": "circular_slot",
+      "phase": "finishing",
+      "estimated_removal_volume_mm3": 1240.0,
+      "mrr_mm3_per_min": 800.0,
+      "machining_time_min": 1.55,
+      "tool_change_time_min": 0.0,
+      "operation_time_min": 1.55
+    },
+    {
+      "step": 11,
+      "operation_type": "chamfer_mill",
+      "feature_type": "chamfer",
+      "phase": "finishing",
+      "estimated_removal_volume_mm3": 620.0,
+      "mrr_mm3_per_min": 300.0,
+      "machining_time_min": 2.066666666666667,
+      "tool_change_time_min": 2.0,
+      "operation_time_min": 4.066666666666666
+    }
+  ],
+  "material": "aluminium_6061",
+  "setup_count": 2,
+  "setup_time_per_setup_min": 15.0,
+  "tool_change_count": 7,
+  "tool_change_time_min": 2.0,
+  "assumptions": [
+    "Removal volume distributed by feature type weight heuristic",
+    "Cutting parameters for aluminium_6061 from standard tables",
+    "15.0 min per setup for workholding and alignment",
+    "2.0 min per tool change"
+  ],
+  "metadata_file": "/Users/nikail/Part4System/data/validation/simple_block/metadata.json",
+  "process_plan_file": "/Users/nikail/Part4System/data/validation/simple_block/process_plan.json",
+  "time_estimate_file": "/Users/nikail/Part4System/data/validation/simple_block/time_estimate.json",
+  "warnings": []
+}

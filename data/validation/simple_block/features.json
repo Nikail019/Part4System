@@ -1,0 +1,46 @@
+{
+  "features": [
+    {
+      "type": "flat_face",
+      "confidence": 0.6599153280258179
+    },
+    {
+      "type": "chamfer",
+      "confidence": 0.5887740850448608
+    },
+    {
+      "type": "blind_hole",
+      "confidence": 0.5750252604484558
+    },
+    {
+      "type": "boss",
+      "confidence": 0.5587626099586487
+    },
+    {
+      "type": "circular_pocket",
+      "confidence": 0.546989917755127
+    },
+    {
+      "type": "circular_slot",
+      "confidence": 0.5315178632736206
+    }
+  ],
+  "feature_count": 6,
+  "all_scores": {
+    "through_hole": 0.34506696462631226,
+    "blind_hole": 0.5750252604484558,
+    "rectangular_pocket": 0.35768935084342957,
+    "circular_pocket": 0.546989917755127,
+    "rectangular_slot": 0.29127129912376404,
+    "circular_slot": 0.5315178632736206,
+    "rectangular_step": 0.29072853922843933,
+    "chamfer": 0.5887740850448608,
+    "fillet": 0.2844654321670532,
+    "boss": 0.5587626099586487,
+    "flat_face": 0.6599153280258179,
+    "triangular_pocket": 0.3942261338233948
+  },
+  "threshold": 0.5,
+  "voxel_file": "/Users/nikail/Part4System/data/validation/simple_block/voxel_32.npy",
+  "model_path": "/Users/nikail/Part4System/checkpoints/best.pt"
+}

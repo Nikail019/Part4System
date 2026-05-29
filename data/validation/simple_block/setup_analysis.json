@@ -1,0 +1,47 @@
+{
+  "setup_count": 2,
+  "axis_requirement": 3,
+  "setups": [
+    {
+      "id": 0,
+      "approach_direction": "+Z",
+      "rotation_from_previous": "initial",
+      "surface_voxel_count": 1645,
+      "surface_coverage_fraction": 0.7363473589973142
+    },
+    {
+      "id": 1,
+      "approach_direction": "-Z",
+      "rotation_from_previous": "flip_around_X_180",
+      "surface_voxel_count": 589,
+      "surface_coverage_fraction": 0.26365264100268576
+    }
+  ],
+  "direction_coverage": {
+    "+X": 0.11056401074306177,
+    "-X": 0.11056401074306177,
+    "+Y": 0.18039391226499552,
+    "-Y": 0.18039391226499552,
+    "+Z": 0.7363473589973142,
+    "-Z": 0.7363473589973142
+  },
+  "total_surface_voxels": 2234,
+  "covered_surface_voxels": 2234,
+  "inaccessible_surface_voxels": 0,
+  "inaccessible_fraction": 0.0,
+  "features_per_setup": {
+    "0": [
+      "flat_face",
+      "chamfer",
+      "blind_hole",
+      "boss",
+      "circular_pocket",
+      "circular_slot"
+    ],
+    "1": []
+  },
+  "voxel_file": "/Users/nikail/Part4System/data/validation/simple_block/voxel_32.npy",
+  "accessibility_map_file": "/Users/nikail/Part4System/data/validation/simple_block/accessibility_map.npy",
+  "surface_mask_file": "/Users/nikail/Part4System/data/validation/simple_block/surface_mask.npy",
+  "warnings": []
+}

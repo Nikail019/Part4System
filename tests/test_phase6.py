@@ -9,6 +9,8 @@ from phase6_quotation import (
     check_axis_capability,
     check_capacity,
     check_material_available,
+    check_tool_reach,
+    check_tooling_available,
     check_work_envelope,
     compute_cost,
     generate_quotation,
@@ -217,6 +219,33 @@ def test_recommendation_accept_on_capable_factory(input_files):
     assert result["flags"] == []
 
 
+def test_recommendation_review_on_25d_incompatibility(input_files, tmp_path):
+    review_plan = copy.deepcopy(MINIMAL_PLAN)
+    review_plan["two_point_five_d_compatible"] = False
+    review_plan["unsupported_reasons"] = ["rectangular_pocket instance 0 requires side access."]
+    review_plan["review_items"] = [
+        {
+            "code": "SIDE_ACCESS_REQUIRED",
+            "severity": "review",
+            "message": "rectangular_pocket instance 0 requires side access.",
+            "source": "phase3_setup_analysis",
+        }
+    ]
+    plan_path = tmp_path / "plan_review.json"
+    plan_path.write_text(json.dumps(review_plan))
+    result = generate_quotation(
+        str(plan_path),
+        input_files["time"],
+        input_files["meta"],
+        input_files["factory"],
+        input_files["out"],
+    )
+    assert result["recommendation"] == "REVIEW"
+    assert result["review_required"] is True
+    assert "SIDE_ACCESS_REQUIRED" in result["review_codes"]
+    assert any("2.5D" in flag or "side access" in flag for flag in result["flags"])
+
+
 def test_recommendation_reject_axis_mismatch(input_files, tmp_path):
     plan_5axis = copy.deepcopy(MINIMAL_PLAN)
     plan_5axis["axis_requirement"] = 5
@@ -241,12 +270,38 @@ def test_recommendation_reject_wrong_material(input_files):
     assert result["recommendation"] == "REJECT"
 
 
-def test_all_four_capability_checks_present(input_files):
+def test_capability_checks_present(input_files):
     result = generate_quotation(
         input_files["plan"], input_files["time"], input_files["meta"], input_files["factory"], input_files["out"]
     )
-    for check in ["axis_capability", "work_envelope", "material_available", "capacity"]:
+    for check in [
+        "axis_capability",
+        "work_envelope",
+        "material_available",
+        "capacity",
+        "tooling_available",
+        "tool_reach",
+    ]:
         assert check in result["capability_checks"]
+
+
+def test_tooling_check_reports_missing_tool():
+    result = check_tooling_available({"tool_list": ["wire_edm"]}, MINIMAL_FACTORY)
+    assert result["pass"] is False
+    assert "wire_edm" in result["missing"]
+
+
+def test_tool_reach_check_reports_depth_failure():
+    factory = copy.deepcopy(MINIMAL_FACTORY)
+    factory["tool_library"] = [{"tool_type": "flat_endmill", "max_depth_mm": 10.0}]
+    plan = {
+        "feature_feasibility": [
+            {"type": "rectangular_pocket", "instance_id": 0, "estimated_depth_mm": 25.0}
+        ]
+    }
+    result = check_tool_reach(plan, factory)
+    assert result["pass"] is False
+    assert result["failures"][0]["available_reach_mm"] == 10.0
 
 
 def test_quotation_path_absolute(input_files):
@@ -319,5 +374,5 @@ def test_full_pipeline_simple_block(tmp_path):
         str(tmp_path),
         material="aluminium_6061",
     )
-    assert result["recommendation"] in ("ACCEPT", "REJECT")
+    assert result["recommendation"] in ("ACCEPT", "REVIEW", "REJECT")
     assert result["estimated_cost"]["total"] > 0

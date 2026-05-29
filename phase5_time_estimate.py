@@ -123,6 +123,16 @@ def _stock_volume(metadata: dict) -> float:
     return float(raw_stock.get("x", 0.0) * raw_stock.get("y", 0.0) * raw_stock.get("z", 0.0))
 
 
+def _voxel_volume_mm3(metadata: dict) -> float:
+    bbox = metadata.get("bounding_box_mm", {})
+    longest = max(float(bbox.get(axis, 0.0)) for axis in ("x", "y", "z"))
+    resolution = int(metadata.get("resolution", 0))
+    if longest <= 0 or resolution <= 2:
+        return 0.0
+    pitch = longest / float(resolution - 2)
+    return pitch**3
+
+
 def estimate_removal_volumes(
     operations: list[dict],
     metadata: dict,
@@ -132,10 +142,25 @@ def estimate_removal_volumes(
     part_volume = float(metadata.get("volume_mm3", 0.0))
     total_removal = max(0.0, raw_stock_volume - part_volume)
     surface_area = float(metadata.get("surface_area_mm2", 0.0))
+    voxel_volume = _voxel_volume_mm3(metadata)
 
     roughing_ops = [op for op in operations if op.get("phase") == "roughing"]
+    roughing_ops_without_instance_volume = [
+        op
+        for op in roughing_ops
+        if int(op.get("feature_volume_voxels", 0)) <= 0 or voxel_volume <= 0
+    ]
+    explicit_roughing_volume = sum(
+        int(op.get("feature_volume_voxels", 0))
+        * voxel_volume
+        / max(1, int(op.get("pass_count", 1)))
+        for op in roughing_ops
+        if int(op.get("feature_volume_voxels", 0)) > 0 and voxel_volume > 0
+    )
+    remaining_removal = max(0.0, total_removal - explicit_roughing_volume)
     roughing_weight_sum = sum(
-        FEATURE_VOLUME_WEIGHT.get(op.get("feature_type"), 0.01) for op in roughing_ops
+        FEATURE_VOLUME_WEIGHT.get(op.get("feature_type"), 0.01)
+        for op in roughing_ops_without_instance_volume
     )
 
     volumes: dict[int, float] = {}
@@ -143,9 +168,12 @@ def estimate_removal_volumes(
         step = int(op["step"])
         feature = op.get("feature_type", "")
         if op.get("phase") == "roughing":
-            if roughing_weight_sum > 0:
+            feature_volume_voxels = int(op.get("feature_volume_voxels", 0))
+            if feature_volume_voxels > 0 and voxel_volume > 0:
+                volume = feature_volume_voxels * voxel_volume / max(1, int(op.get("pass_count", 1)))
+            elif roughing_weight_sum > 0:
                 weight = FEATURE_VOLUME_WEIGHT.get(feature, 0.01)
-                volume = total_removal * weight / roughing_weight_sum
+                volume = remaining_removal * weight / roughing_weight_sum
             else:
                 volume = 0.0
         else:
@@ -219,6 +247,7 @@ def estimate_time(
                 "step": step,
                 "operation_type": op.get("operation_type"),
                 "feature_type": op.get("feature_type"),
+                "feature_instance_id": op.get("feature_instance_id"),
                 "phase": op.get("phase"),
                 "estimated_removal_volume_mm3": volume,
                 **time_info,
@@ -243,7 +272,8 @@ def estimate_time(
         "tool_change_count": tool_change_count,
         "tool_change_time_min": float(tool_change_time_min),
         "assumptions": [
-            "Removal volume distributed by feature type weight heuristic",
+            "Roughing volume uses feature instance voxel volume when available",
+            "Remaining removal volume distributed by feature type weight heuristic",
             f"Cutting parameters for {material} from standard tables",
             f"{float(setup_time_min)} min per setup for workholding and alignment",
             f"{float(tool_change_time_min)} min per tool change",

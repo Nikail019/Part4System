@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import tempfile
 
 
@@ -97,6 +98,9 @@ OPERATION_MAP_TOOL_DEFAULTS = {
     if ops
 }
 
+SETUP_MODE = "2.5d_single_setup"
+DEFAULT_APPROACH_DIRECTION = "+Z"
+
 
 def _load_json(path: str, label: str) -> dict:
     """Load JSON file, raising explicit file or parse errors."""
@@ -188,6 +192,53 @@ def _format_tool_size(value: float) -> str:
     return str(int(value)) if float(value).is_integer() else str(value)
 
 
+def _tool_diameter_mm(tool_type: str, feature_type: str, operation: dict) -> float | None:
+    if operation.get("diameter_mm") is not None:
+        return float(operation["diameter_mm"])
+    if operation.get("width_mm") is not None and feature_type not in ("through_hole", "blind_hole"):
+        return round(max(1.0, float(operation["width_mm"]) * 0.4), 3)
+
+    match = re.search(r"_(\d+(?:\.\d+)?)mm$", tool_type or "")
+    if match:
+        return float(match.group(1))
+    defaults = {
+        "centre_drill": 3.0,
+        "flat_endmill": 8.0,
+        "shoulder_mill": 12.0,
+        "face_mill": 50.0,
+        "chamfer_mill": 6.0,
+        "ball_endmill": 6.0,
+    }
+    return defaults.get(tool_type)
+
+
+def _cut_depth_mm(operation: dict) -> float | None:
+    if operation.get("depth_mm") is not None:
+        return float(operation["depth_mm"])
+    if operation.get("feature_type") == "flat_face":
+        return 1.0
+    return None
+
+
+def _copy_pmi_dimensions(operation: dict, pmi: dict | None) -> dict:
+    if not pmi:
+        return operation
+    for key in (
+        "diameter_mm",
+        "depth_mm",
+        "depth_ratio",
+        "width_mm",
+        "length_mm",
+        "rough_passes",
+        "peck_required",
+        "threaded",
+        "thread_spec",
+    ):
+        if key in pmi:
+            operation[key] = pmi[key]
+    return operation
+
+
 def _select_tool_size(feature_type: str, pmi: dict | None) -> str:
     """Return a sized tool label when dimensions are available."""
     if pmi is None:
@@ -251,21 +302,25 @@ def _expand_feature_with_pmi(
     if feature_type in ("through_hole", "blind_hole"):
         drill_tool = _select_tool_size(feature_type, pmi)
         drill_type = "drill_peck" if pmi.get("peck_required") else "drill"
-        operations.append(
-            _operation(setup_id, approach_direction, feature_type, "centre_drill", "centre_drill", "roughing")
-        )
-        operations.append(
-            _operation(setup_id, approach_direction, feature_type, drill_type, drill_tool, "roughing")
-        )
+        operations.append(_copy_pmi_dimensions(
+            _operation(setup_id, approach_direction, feature_type, "centre_drill", "centre_drill", "roughing"),
+            pmi,
+        ))
+        operations.append(_copy_pmi_dimensions(
+            _operation(setup_id, approach_direction, feature_type, drill_type, drill_tool, "roughing"),
+            pmi,
+        ))
         if pmi.get("threaded"):
             tap_tool = pmi.get("thread_spec") or "tap"
-            operations.append(
-                _operation(setup_id, approach_direction, feature_type, "tap", tap_tool, "roughing")
-            )
+            operations.append(_copy_pmi_dimensions(
+                _operation(setup_id, approach_direction, feature_type, "tap", tap_tool, "roughing"),
+                pmi,
+            ))
         if ra_um < 1.6:
-            operations.append(
-                _operation(setup_id, approach_direction, feature_type, "boring", "boring_bar", "finishing")
-            )
+            operations.append(_copy_pmi_dimensions(
+                _operation(setup_id, approach_direction, feature_type, "boring", "boring_bar", "finishing"),
+                pmi,
+            ))
         return operations
 
     if feature_type in (
@@ -285,23 +340,24 @@ def _expand_feature_with_pmi(
             if rough_passes > 1:
                 op["pass_number"] = pass_idx + 1
                 op["pass_count"] = rough_passes
-            operations.append(op)
+            operations.append(_copy_pmi_dimensions(op, pmi))
         finish_op = _operation(setup_id, approach_direction, feature_type, finish_type, tool, "finishing")
         if ra_um < 1.6:
             finish_op["finish_requirement"] = f"Ra {ra_um:g} um"
-        operations.append(finish_op)
+        operations.append(_copy_pmi_dimensions(finish_op, pmi))
         return operations
 
     if feature_type == "flat_face":
-        operations.append(
-            _operation(setup_id, approach_direction, feature_type, "face_mill_rough", "face_mill", "roughing")
-        )
+        operations.append(_copy_pmi_dimensions(
+            _operation(setup_id, approach_direction, feature_type, "face_mill_rough", "face_mill", "roughing"),
+            pmi,
+        ))
         finish_op = _operation(
             setup_id, approach_direction, feature_type, "face_mill_finish", "face_mill", "finishing"
         )
         if ra_um < 0.8:
             finish_op["finish_requirement"] = f"Ra {ra_um:g} um"
-        operations.append(finish_op)
+        operations.append(_copy_pmi_dimensions(finish_op, pmi))
         return operations
 
     return _expand_feature(feature_type, setup_id, approach_direction)
@@ -370,6 +426,83 @@ def _build_operations(
     return operations, warnings
 
 
+def _phase_instances(instances: list[dict], phase: str) -> list[dict]:
+    result = []
+    for instance in instances:
+        feature_type = instance.get("type")
+        ops = OPERATION_MAP.get(feature_type, [])
+        if any(op["phase"] == phase for op in ops):
+            result.append(instance)
+    return sorted(
+        result,
+        key=lambda item: (
+            ROUGHING_PRIORITY.get(item.get("type"), 99),
+            int(item.get("instance_id", 0)),
+        ),
+    )
+
+
+def _pmi_for_instance(
+    pmi_by_type: dict[str, list[dict]] | None,
+    feature_type: str,
+    instance_id: int,
+) -> dict | None:
+    if pmi_by_type is None:
+        return None
+    entries = pmi_by_type.get(feature_type, [])
+    for entry in entries:
+        if int(entry.get("instance_id", -1)) == int(instance_id):
+            return entry
+    return entries[0] if entries else None
+
+
+def _build_operations_for_instances(
+    feature_instances_per_setup: dict[str, list[dict]],
+    setup_list: list[dict],
+    pmi_by_type: dict[str, list[dict]] | None = None,
+    material: str = "aluminium_6061",
+) -> tuple[list[dict], list[str]]:
+    """Apply setup and operation sequencing rules to feature instances."""
+    operations: list[dict] = []
+    warnings: list[str] = []
+
+    setup_order = sorted(setup_list, key=lambda setup: int(setup.get("id", 0)))
+    for setup in setup_order:
+        setup_id = int(setup["id"])
+        approach_direction = setup.get("approach_direction", "")
+        instances = feature_instances_per_setup.get(str(setup_id), [])
+
+        for instance in instances:
+            feature_type = instance.get("type")
+            if feature_type not in OPERATION_MAP:
+                warnings.append(f"No operation mapping for feature: {feature_type}")
+
+        for phase_instance_list, phase in (
+            (_phase_instances(instances, "roughing"), "roughing"),
+            (_phase_instances(instances, "finishing"), "finishing"),
+        ):
+            for instance in phase_instance_list:
+                feature_type = instance.get("type")
+                instance_id = int(instance.get("instance_id", 0))
+                pmi_entry = _pmi_for_instance(pmi_by_type, feature_type, instance_id)
+                expanded = _expand_feature_with_pmi(
+                    feature_type,
+                    setup_id,
+                    approach_direction,
+                    pmi_entry,
+                    material,
+                )
+                for operation in expanded:
+                    if operation["phase"] != phase:
+                        continue
+                    operation["feature_instance_id"] = instance_id
+                    operation["feature_volume_voxels"] = int(instance.get("volume_voxels", 0))
+                    operation["localisation_status"] = instance.get("localisation_status", "unknown")
+                    operations.append(operation)
+
+    return operations, warnings
+
+
 def _resolve_features_per_setup(
     setup_analysis: dict,
     features: list[dict],
@@ -388,6 +521,62 @@ def _resolve_features_per_setup(
             result = {"0": []}
         result["0"] = [feature["type"] for feature in features if "type" in feature]
     return result
+
+
+def _single_setup() -> list[dict]:
+    return [
+        {
+            "id": 0,
+            "approach_direction": DEFAULT_APPROACH_DIRECTION,
+            "rotation_from_previous": "initial",
+        }
+    ]
+
+
+def _merge_features_to_setup0(features_per_setup: dict[str, list[str]]) -> dict[str, list[str]]:
+    merged: list[str] = []
+    for values in features_per_setup.values():
+        if not isinstance(values, list):
+            continue
+        merged.extend(feature for feature in values if isinstance(feature, str))
+    return {"0": merged}
+
+
+def _normalise_instances_to_setup0(
+    feature_instances_per_setup: dict[str, list[dict]],
+) -> tuple[dict[str, list[dict]], list[dict]]:
+    merged: list[dict] = []
+    review_items: list[dict] = []
+    for instances in feature_instances_per_setup.values():
+        if not isinstance(instances, list):
+            continue
+        for instance in instances:
+            if not isinstance(instance, dict):
+                continue
+            if instance.get("two_point_five_d_supported") is False:
+                reason = instance.get("unsupported_reason") or (
+                    f"{instance.get('type')} instance {instance.get('instance_id')} is outside the +Z 2.5D baseline."
+                )
+                review_items.append(
+                    {
+                        "code": "UNSUPPORTED_25D_INSTANCE",
+                        "severity": "review",
+                        "message": str(reason),
+                        "source": "phase4_process_plan",
+                        "feature_type": instance.get("type"),
+                        "instance_id": int(instance.get("instance_id", 0)),
+                    }
+                )
+                continue
+            copied = dict(instance)
+            copied["primary_direction"] = DEFAULT_APPROACH_DIRECTION
+            copied["access_directions"] = [DEFAULT_APPROACH_DIRECTION]
+            merged.append(copied)
+    return {"0": merged}, review_items
+
+
+def _review_messages(items: list[dict]) -> list[str]:
+    return [str(item.get("message", "")) for item in items if item.get("message")]
 
 
 def _write_json_atomic(data: dict, path: str) -> None:
@@ -411,6 +600,36 @@ def _validate_inputs(metadata: dict, features: dict, setup_analysis: dict) -> No
         raise ValueError("setup_analysis JSON missing 'axis_requirement'.")
     if not isinstance(metadata, dict):
         raise ValueError("metadata JSON must contain an object.")
+
+
+def _enrich_operations_for_simulation(operations: list[dict], metadata: dict) -> list[dict]:
+    try:
+        from phase5_time_estimate import estimate_removal_volumes
+
+        removal_volumes = estimate_removal_volumes(operations, metadata)
+    except Exception:
+        removal_volumes = {}
+
+    enriched = []
+    for operation in operations:
+        op = dict(operation)
+        step = int(op.get("step", len(enriched) + 1))
+        op["operation_id"] = step
+        op.setdefault("feature_instance_id", None)
+        op["tool_diameter_mm"] = _tool_diameter_mm(
+            str(op.get("tool_type", "")),
+            str(op.get("feature_type", "")),
+            op,
+        )
+        op["cut_depth_mm"] = _cut_depth_mm(op)
+        op["estimated_removal_volume_mm3"] = removal_volumes.get(step)
+        op["requires_review"] = bool(
+            op.get("requires_review")
+            or op.get("localisation_status") in {"estimated", "unknown"}
+            or op.get("two_point_five_d_supported") is False
+        )
+        enriched.append(op)
+    return enriched
 
 
 def _filter_features(features: list[dict], threshold: float) -> tuple[list[dict], list[str]]:
@@ -451,6 +670,7 @@ def generate_process_plan(
     output_dir: str,
     confidence_threshold: float = 0.5,
     pmi_data_path: str | None = None,
+    feature_instances_path: str | None = None,
 ) -> dict:
     """Generate a sequenced process plan from Phase 1-3 outputs."""
     metadata = _load_json(metadata_path, "metadata")
@@ -461,7 +681,23 @@ def generate_process_plan(
     filtered_features, warnings = _filter_features(
         features_json["features"], confidence_threshold
     )
+    setup_review_items = [
+        item for item in setup_analysis.get("review_items", []) if isinstance(item, dict)
+    ]
+    if not setup_review_items:
+        setup_review_items = [
+            {
+                "code": "SETUP_REVIEW",
+                "severity": "review",
+                "message": str(reason),
+                "source": "phase3_setup_analysis",
+            }
+            for reason in setup_analysis.get("unsupported_reasons", [])
+        ]
+    setup_unsupported_reasons = _review_messages(setup_review_items)
+    warnings.extend(setup_unsupported_reasons)
     features_per_setup = _resolve_features_per_setup(setup_analysis, filtered_features)
+    features_per_setup = _merge_features_to_setup0(features_per_setup)
     features_per_setup = _filter_features_per_setup(features_per_setup, filtered_features)
     original_fps = setup_analysis.get("features_per_setup", {})
     if filtered_features and all(len(values) == 0 for values in original_fps.values()):
@@ -480,14 +716,45 @@ def generate_process_plan(
                 pmi_by_type.setdefault(feature_type, []).append(feature_pmi)
         warnings.extend(pmi_data.get("warnings", []))
 
-    raw_operations, build_warnings = _build_operations(
-        features_per_setup, setup_analysis["setups"], pmi_by_type, material
+    feature_instances_per_setup = setup_analysis.get("feature_instances_per_setup", {})
+    if not isinstance(feature_instances_per_setup, dict):
+        feature_instances_per_setup = {}
+    has_instance_input = any(feature_instances_per_setup.values())
+    feature_instances_per_setup, instance_review_items = _normalise_instances_to_setup0(
+        feature_instances_per_setup
     )
+    instance_review_warnings = _review_messages(instance_review_items)
+    warnings.extend(instance_review_warnings)
+    setup_list = _single_setup()
+    requires_rotation = bool(setup_analysis.get("requires_rotation", False))
+    two_point_five_d_compatible = (
+        bool(setup_analysis.get("two_point_five_d_compatible", True))
+        and not instance_review_warnings
+        and not requires_rotation
+    )
+
+    if has_instance_input:
+        filtered_instance_map = {}
+        for setup_id, instances in feature_instances_per_setup.items():
+            filtered_instance_map[setup_id] = [
+                instance
+                for instance in instances
+                if float(instance.get("confidence", 1.0)) >= confidence_threshold
+                or "confidence" not in instance
+            ]
+        raw_operations, build_warnings = _build_operations_for_instances(
+            filtered_instance_map, setup_list, pmi_by_type, material
+        )
+    else:
+        raw_operations, build_warnings = _build_operations(
+            features_per_setup, setup_list, pmi_by_type, material
+        )
     warnings.extend(build_warnings)
 
     operations = []
     for step, operation in enumerate(raw_operations, start=1):
         operations.append({"step": step, **operation})
+    operations = _enrich_operations_for_simulation(operations, metadata)
 
     tool_list = sorted({operation["tool_type"] for operation in operations})
     output_abs = os.path.abspath(output_dir)
@@ -497,8 +764,28 @@ def generate_process_plan(
     result = {
         "operations": operations,
         "operation_count": len(operations),
-        "setup_count": int(setup_analysis["setup_count"]),
-        "axis_requirement": int(setup_analysis["axis_requirement"]),
+        "setup_count": 1,
+        "axis_requirement": 3,
+        "setup_mode": SETUP_MODE,
+        "two_point_five_d_compatible": two_point_five_d_compatible,
+        "tool_reach_compatible": bool(setup_analysis.get("tool_reach_compatible", True)),
+        "feature_feasibility": setup_analysis.get("feature_feasibility", []),
+        "review_items": list({json.dumps(item, sort_keys=True): item for item in setup_review_items + instance_review_items}.values()),
+        "review_codes": sorted(
+            {
+                str(item.get("code"))
+                for item in setup_review_items + instance_review_items
+                if item.get("code")
+            }
+        ),
+        "tool_reach_warnings": list(setup_analysis.get("tool_reach_warnings", [])),
+        "unsupported_reasons": list(
+            dict.fromkeys(
+                setup_unsupported_reasons + instance_review_warnings
+            )
+        ),
+        "requires_rotation": requires_rotation,
+        "setups": setup_list,
         "tool_list": tool_list,
         "source_files": {
             "metadata": os.path.abspath(metadata_path),
@@ -511,6 +798,8 @@ def generate_process_plan(
     if pmi_data is not None:
         result["source_files"]["pmi_data"] = os.path.abspath(pmi_data_path)
         result["material"] = material
+    if feature_instances_path and os.path.exists(feature_instances_path):
+        result["source_files"]["feature_instances"] = os.path.abspath(feature_instances_path)
     _write_json_atomic(result, process_plan_file)
     return result
 
@@ -525,6 +814,7 @@ def main() -> None:
     parser.add_argument("output_dir", help="Directory to write process_plan.json")
     parser.add_argument("--confidence", type=float, default=0.5)
     parser.add_argument("--pmi-data", default=None, dest="pmi_data")
+    parser.add_argument("--feature-instances", default=None, dest="feature_instances")
     args = parser.parse_args()
 
     result = generate_process_plan(
@@ -534,6 +824,7 @@ def main() -> None:
         args.output_dir,
         confidence_threshold=args.confidence,
         pmi_data_path=args.pmi_data,
+        feature_instances_path=args.feature_instances,
     )
     print(json.dumps(result, indent=2))
 

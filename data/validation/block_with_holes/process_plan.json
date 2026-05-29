@@ -1,0 +1,131 @@
+{
+  "operations": [
+    {
+      "step": 1,
+      "setup_id": 0,
+      "approach_direction": "+Z",
+      "feature_type": "flat_face",
+      "operation_type": "face_mill_rough",
+      "tool_type": "face_mill",
+      "phase": "roughing",
+      "notes": "Establish datum reference surface"
+    },
+    {
+      "step": 2,
+      "setup_id": 0,
+      "approach_direction": "+Z",
+      "feature_type": "boss",
+      "operation_type": "endmill_rough",
+      "tool_type": "flat_endmill",
+      "phase": "roughing",
+      "notes": "Rough pocket / slot to within 0.5mm of final depth"
+    },
+    {
+      "step": 3,
+      "setup_id": 0,
+      "approach_direction": "+Z",
+      "feature_type": "circular_pocket",
+      "operation_type": "endmill_rough",
+      "tool_type": "flat_endmill",
+      "phase": "roughing",
+      "notes": "Rough pocket / slot to within 0.5mm of final depth"
+    },
+    {
+      "step": 4,
+      "setup_id": 0,
+      "approach_direction": "+Z",
+      "feature_type": "circular_slot",
+      "operation_type": "endmill_rough",
+      "tool_type": "flat_endmill",
+      "phase": "roughing",
+      "notes": "Rough pocket / slot to within 0.5mm of final depth"
+    },
+    {
+      "step": 5,
+      "setup_id": 0,
+      "approach_direction": "+Z",
+      "feature_type": "blind_hole",
+      "operation_type": "centre_drill",
+      "tool_type": "centre_drill",
+      "phase": "roughing",
+      "notes": "Spot drill for hole location accuracy"
+    },
+    {
+      "step": 6,
+      "setup_id": 0,
+      "approach_direction": "+Z",
+      "feature_type": "blind_hole",
+      "operation_type": "drill_peck",
+      "tool_type": "twist_drill",
+      "phase": "roughing",
+      "notes": "Peck drill blind hole to depth"
+    },
+    {
+      "step": 7,
+      "setup_id": 0,
+      "approach_direction": "+Z",
+      "feature_type": "flat_face",
+      "operation_type": "face_mill_finish",
+      "tool_type": "face_mill",
+      "phase": "finishing",
+      "notes": "Achieve final face flatness"
+    },
+    {
+      "step": 8,
+      "setup_id": 0,
+      "approach_direction": "+Z",
+      "feature_type": "boss",
+      "operation_type": "endmill_finish",
+      "tool_type": "flat_endmill",
+      "phase": "finishing",
+      "notes": "Finish to final profile"
+    },
+    {
+      "step": 9,
+      "setup_id": 0,
+      "approach_direction": "+Z",
+      "feature_type": "circular_pocket",
+      "operation_type": "endmill_finish",
+      "tool_type": "flat_endmill",
+      "phase": "finishing",
+      "notes": "Finish to final profile"
+    },
+    {
+      "step": 10,
+      "setup_id": 0,
+      "approach_direction": "+Z",
+      "feature_type": "circular_slot",
+      "operation_type": "endmill_finish",
+      "tool_type": "flat_endmill",
+      "phase": "finishing",
+      "notes": "Finish to final profile"
+    },
+    {
+      "step": 11,
+      "setup_id": 0,
+      "approach_direction": "+Z",
+      "feature_type": "chamfer",
+      "operation_type": "chamfer_mill",
+      "tool_type": "chamfer_mill",
+      "phase": "finishing",
+      "notes": "Apply chamfer to edges"
+    }
+  ],
+  "operation_count": 11,
+  "setup_count": 2,
+  "axis_requirement": 3,
+  "tool_list": [
+    "centre_drill",
+    "chamfer_mill",
+    "face_mill",
+    "flat_endmill",
+    "twist_drill"
+  ],
+  "source_files": {
+    "metadata": "/Users/nikail/Part4System/data/validation/block_with_holes/metadata.json",
+    "features": "/Users/nikail/Part4System/data/validation/block_with_holes/features.json",
+    "setup_analysis": "/Users/nikail/Part4System/data/validation/block_with_holes/setup_analysis.json"
+  },
+  "process_plan_file": "/Users/nikail/Part4System/data/validation/block_with_holes/process_plan.json",
+  "warnings": []
+}

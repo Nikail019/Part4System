@@ -199,6 +199,14 @@ def test_update_paths_phase2(tmp_path):
     assert "features_file" in paths
 
 
+def test_update_paths_phase4_includes_simulation_input(tmp_path):
+    args = make_args(output=str(tmp_path))
+    paths = {}
+    _update_paths_from_cache(4, args, paths)
+    assert "process_plan_file" in paths
+    assert "simulation_input_file" in paths
+
+
 def test_dry_run_prints_without_creating_files(tmp_path, capsys):
     args = make_args(
         output=str(tmp_path),
@@ -265,6 +273,27 @@ def test_print_summary_reject_shows_flags(capsys):
     assert "5-axis" in captured.out
 
 
+def test_print_summary_review(capsys):
+    manifest = {
+        "summary": {
+            "recommendation": "REVIEW",
+            "total_cost": 120.0,
+            "currency": "NZD",
+            "total_time_min": 45.0,
+            "operation_count": 8,
+            "setup_count": 1,
+            "axis_requirement": 3,
+            "flags": ["Part violates the single-setup +Z 2.5D machining baseline."],
+        },
+        "total_duration_sec": 3.1,
+        "warnings": [],
+    }
+    print_summary(manifest)
+    captured = capsys.readouterr()
+    assert "REVIEW" in captured.out
+    assert "2.5D" in captured.out
+
+
 @pytest.mark.skipif(
     not os.path.exists(STP_FILE) or not os.path.exists(FACTORY),
     reason="Test fixtures or factory profile not available",
@@ -293,7 +322,7 @@ def test_full_pipeline_simple_block(tmp_path):
     assert os.path.exists(tmp_path / "quotation.json")
     assert os.path.exists(tmp_path / f"voxel_{DEFAULT_RESOLUTION}.npy")
     summary = manifest["summary"]
-    assert summary["recommendation"] in ("ACCEPT", "REJECT")
+    assert summary["recommendation"] in ("ACCEPT", "REVIEW", "REJECT")
     assert summary["total_time_min"] is not None and summary["total_time_min"] > 0
     assert summary["operation_count"] is not None and summary["operation_count"] > 0
 

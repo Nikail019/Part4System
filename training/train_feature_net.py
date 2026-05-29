@@ -70,6 +70,47 @@ def _compute_f1(model, loader, device, threshold: float = 0.5) -> float:
     return float(f1.mean().item())
 
 
+def _collect_probabilities(model, loader, device) -> tuple[torch.Tensor, torch.Tensor]:
+    model.eval()
+    probs = []
+    targets = []
+    with torch.no_grad():
+        for x, y in loader:
+            probs.append(torch.sigmoid(model(x.to(device))).cpu())
+            targets.append(y.float())
+    if not probs:
+        return torch.zeros(0, NUM_CLASSES), torch.zeros(0, NUM_CLASSES)
+    return torch.cat(probs), torch.cat(targets)
+
+
+def _f1_from_predictions(preds: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+    tp = (preds * targets).sum(dim=0)
+    fp = (preds * (1 - targets)).sum(dim=0)
+    fn = ((1 - preds) * targets).sum(dim=0)
+    precision = tp / (tp + fp + 1e-8)
+    recall = tp / (tp + fn + 1e-8)
+    return 2 * precision * recall / (precision + recall + 1e-8)
+
+
+def _calibrate_thresholds(model, loader, device) -> dict:
+    probs, targets = _collect_probabilities(model, loader, device)
+    if probs.numel() == 0:
+        return {name: 0.5 for name in FEATURE_NAMES}
+    thresholds = {}
+    grid = torch.arange(0.10, 0.96, 0.05)
+    for class_idx, name in enumerate(FEATURE_NAMES):
+        best_threshold = 0.5
+        best_f1 = -1.0
+        for threshold in grid:
+            preds = (probs[:, class_idx] >= threshold).float()
+            f1 = float(_f1_from_predictions(preds[:, None], targets[:, class_idx : class_idx + 1])[0])
+            if f1 > best_f1:
+                best_f1 = f1
+                best_threshold = float(threshold)
+        thresholds[name] = round(best_threshold, 2)
+    return thresholds
+
+
 def _classification_stats(model, loader, device, threshold: float = 0.5):
     model.eval()
     all_preds = []
@@ -78,6 +119,22 @@ def _classification_stats(model, loader, device, threshold: float = 0.5):
         for x, y in loader:
             probs = torch.sigmoid(model(x.to(device))).cpu()
             all_preds.append((probs >= threshold).float())
+            all_targets.append(y.float())
+    if not all_preds:
+        empty = torch.zeros(0, NUM_CLASSES)
+        return empty, empty
+    return torch.cat(all_preds), torch.cat(all_targets)
+
+
+def _classification_stats_with_thresholds(model, loader, device, thresholds: dict[str, float]):
+    model.eval()
+    all_preds = []
+    all_targets = []
+    threshold_tensor = torch.tensor([thresholds.get(name, 0.5) for name in FEATURE_NAMES]).view(1, -1)
+    with torch.no_grad():
+        for x, y in loader:
+            probs = torch.sigmoid(model(x.to(device))).cpu()
+            all_preds.append((probs >= threshold_tensor).float())
             all_targets.append(y.float())
     if not all_preds:
         empty = torch.zeros(0, NUM_CLASSES)
@@ -110,6 +167,44 @@ def _print_per_class_report(model, loader, device, threshold: float = 0.5) -> di
         }
     print(f"\n  Macro F1: {float(f1.mean()):.4f}")
     return report
+
+
+def _print_per_class_report_with_thresholds(model, loader, device, thresholds: dict[str, float]) -> dict:
+    preds, targets = _classification_stats_with_thresholds(model, loader, device, thresholds)
+    if preds.numel() == 0:
+        return {name: {"precision": 0.0, "recall": 0.0, "f1": 0.0, "threshold": thresholds.get(name, 0.5)} for name in FEATURE_NAMES}
+
+    f1 = _f1_from_predictions(preds, targets)
+    tp = (preds * targets).sum(dim=0)
+    fp = (preds * (1 - targets)).sum(dim=0)
+    fn = ((1 - preds) * targets).sum(dim=0)
+    precision = tp / (tp + fp + 1e-8)
+    recall = tp / (tp + fn + 1e-8)
+
+    print("\nPer-class results on test split with calibrated thresholds:")
+    print(f"  {'Feature':<25} {'Thr':>6} {'P':>6} {'R':>6} {'F1':>6}")
+    print(f"  {'-' * 25} {'-' * 6} {'-' * 6} {'-' * 6} {'-' * 6}")
+    report = {}
+    for idx, name in enumerate(FEATURE_NAMES):
+        threshold = thresholds.get(name, 0.5)
+        print(f"  {name:<25} {threshold:>6.2f} {precision[idx]:>6.3f} {recall[idx]:>6.3f} {f1[idx]:>6.3f}")
+        report[name] = {
+            "threshold": round(float(threshold), 4),
+            "precision": round(float(precision[idx]), 4),
+            "recall": round(float(recall[idx]), 4),
+            "f1": round(float(f1[idx]), 4),
+        }
+    print(f"\n  Macro F1: {float(f1.mean()):.4f}")
+    return report
+
+
+def _store_thresholds(checkpoint_path: Path, thresholds: dict[str, float]) -> None:
+    checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    checkpoint["class_thresholds"] = thresholds
+    config = dict(checkpoint.get("training_config", {}))
+    config["class_thresholds"] = thresholds
+    checkpoint["training_config"] = config
+    torch.save(checkpoint, checkpoint_path)
 
 
 def _run_epoch(
@@ -342,11 +437,28 @@ def train(args: argparse.Namespace) -> dict:
             print(f"Early stopping at epoch {epoch} (no F1 improvement for {args.early_stop} epochs)")
             break
 
-    report = _print_per_class_report(model, test_loader, device)
+    best_path = out_dir / "best.pt"
+    if best_path.exists():
+        best_checkpoint = torch.load(best_path, map_location=device)
+        model.load_state_dict(best_checkpoint["model_state_dict"])
+    thresholds = _calibrate_thresholds(model, val_loader, device)
+    if best_path.exists():
+        _store_thresholds(best_path, thresholds)
+    _store_thresholds(out_dir / "last.pt", thresholds)
+    report = _print_per_class_report_with_thresholds(model, test_loader, device, thresholds)
     with (out_dir / "history.json").open("w", encoding="utf-8") as f:
-        json.dump({"classes": FEATURE_NAMES, "history": history, "test_report": report}, f, indent=2)
+        json.dump(
+            {
+                "classes": FEATURE_NAMES,
+                "history": history,
+                "class_thresholds": thresholds,
+                "test_report": report,
+            },
+            f,
+            indent=2,
+        )
         f.write("\n")
-    return {"best_val_f1": best_val_f1, "history": history, "test_report": report}
+    return {"best_val_f1": best_val_f1, "history": history, "class_thresholds": thresholds, "test_report": report}
 
 
 def main() -> None:

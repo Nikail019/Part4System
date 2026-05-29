@@ -23,6 +23,17 @@ REQUIRED_FACTORY_KEYS = {
     "overhead_factor",
     "currency",
 }
+DEFAULT_TOOL_LIBRARY = [
+    {"tool_type": "face_mill", "max_depth_mm": 3.0, "diameter_mm": 50.0},
+    {"tool_type": "centre_drill", "max_depth_mm": 10.0, "diameter_mm": 3.0},
+    {"tool_type": "twist_drill", "max_depth_mm": 80.0, "diameter_mm": 10.0},
+    {"tool_type": "flat_endmill", "max_depth_mm": 50.0, "diameter_mm": 10.0},
+    {"tool_type": "shoulder_mill", "max_depth_mm": 60.0, "diameter_mm": 16.0},
+    {"tool_type": "chamfer_mill", "max_depth_mm": 20.0, "diameter_mm": 8.0},
+    {"tool_type": "ball_endmill", "max_depth_mm": 40.0, "diameter_mm": 8.0},
+    {"tool_type": "tap", "max_depth_mm": 40.0, "diameter_mm": 10.0},
+    {"tool_type": "boring_bar", "max_depth_mm": 80.0, "diameter_mm": 10.0},
+]
 
 
 def _load_json(path: str, label: str) -> dict:
@@ -121,6 +132,82 @@ def check_capacity(
     return result
 
 
+def _base_tool_type(tool_type: str) -> str:
+    if tool_type.startswith("twist_drill_"):
+        return "twist_drill"
+    if tool_type.startswith("flat_endmill_"):
+        return "flat_endmill"
+    return tool_type
+
+
+def _tool_library(factory: dict) -> list[dict]:
+    library = factory.get("tool_library", DEFAULT_TOOL_LIBRARY)
+    return library if isinstance(library, list) else DEFAULT_TOOL_LIBRARY
+
+
+def check_tooling_available(process_plan: dict, factory: dict) -> dict:
+    required = sorted({_base_tool_type(tool) for tool in process_plan.get("tool_list", [])})
+    available = sorted(
+        {
+            str(tool.get("tool_type"))
+            for tool in _tool_library(factory)
+            if isinstance(tool, dict) and tool.get("tool_type")
+        }
+    )
+    missing = [tool for tool in required if tool not in available]
+    result = {
+        "pass": not missing,
+        "required": required,
+        "available": available,
+        "missing": missing,
+    }
+    if missing:
+        result["reason"] = f"Factory tool library is missing required tool types: {', '.join(missing)}."
+    return result
+
+
+def _max_tool_reach_by_type(factory: dict) -> dict[str, float]:
+    reach: dict[str, float] = {}
+    for tool in _tool_library(factory):
+        if not isinstance(tool, dict) or not tool.get("tool_type"):
+            continue
+        reach[str(tool["tool_type"])] = max(
+            reach.get(str(tool["tool_type"]), 0.0),
+            float(tool.get("max_depth_mm", 0.0)),
+        )
+    return reach
+
+
+def check_tool_reach(process_plan: dict, factory: dict) -> dict:
+    reach_by_type = _max_tool_reach_by_type(factory)
+    failures = []
+    for item in process_plan.get("feature_feasibility", []):
+        if not isinstance(item, dict):
+            continue
+        depth = item.get("estimated_depth_mm")
+        if depth is None:
+            continue
+        feature_type = item.get("type")
+        preferred_tool = "twist_drill" if feature_type in ("through_hole", "blind_hole") else "flat_endmill"
+        if feature_type == "rectangular_step":
+            preferred_tool = "shoulder_mill"
+        max_reach = reach_by_type.get(preferred_tool)
+        if max_reach is not None and float(depth) > max_reach:
+            failures.append(
+                {
+                    "feature_type": feature_type,
+                    "instance_id": int(item.get("instance_id", 0)),
+                    "required_depth_mm": float(depth),
+                    "tool_type": preferred_tool,
+                    "available_reach_mm": max_reach,
+                }
+            )
+    result = {"pass": not failures, "failures": failures}
+    if failures:
+        result["reason"] = "One or more features exceed available tool reach."
+    return result
+
+
 def select_machine(
     factory: dict,
     required_axes: int,
@@ -200,11 +287,15 @@ def generate_quotation(
     envelope_check = check_work_envelope(bounding_box, machines, required_axes)
     material_check = check_material_available(material, factory)
     capacity_check = check_capacity(float(time_estimate.get("total_time_min", 0.0)), factory)
+    tooling_check = check_tooling_available(process_plan, factory)
+    tool_reach_check = check_tool_reach(process_plan, factory)
     capability_checks = {
         "axis_capability": axis_check,
         "work_envelope": envelope_check,
         "material_available": material_check,
         "capacity": capacity_check,
+        "tooling_available": tooling_check,
+        "tool_reach": tool_reach_check,
     }
 
     machine = select_machine(factory, required_axes, bounding_box)
@@ -214,7 +305,33 @@ def generate_quotation(
 
     failed_checks = [check for check in capability_checks.values() if not check.get("pass")]
     flags = [check.get("reason", "Capability check failed.") for check in failed_checks]
-    recommendation = "ACCEPT" if not failed_checks else "REJECT"
+    review_items = [
+        item for item in process_plan.get("review_items", []) if isinstance(item, dict)
+    ]
+    review_flags: list[str] = [str(item.get("message")) for item in review_items if item.get("message")]
+    if process_plan.get("two_point_five_d_compatible") is False:
+        review_flags.append("Part violates the single-setup +Z 2.5D machining baseline.")
+    if process_plan.get("requires_rotation"):
+        review_flags.append("Part appears to require stock rotation.")
+    if process_plan.get("tool_reach_compatible") is False:
+        review_flags.append("Part violates the baseline tool-reach assumptions.")
+    review_flags.extend(str(reason) for reason in process_plan.get("unsupported_reasons", []))
+    review_flags = list(dict.fromkeys(review_flags))
+    review_codes = sorted(
+        {
+            str(item.get("code"))
+            for item in review_items
+            if item.get("code")
+        }
+        | set(str(code) for code in process_plan.get("review_codes", []))
+    )
+    flags.extend(flag for flag in review_flags if flag not in flags)
+    if failed_checks:
+        recommendation = "REJECT"
+    elif review_flags:
+        recommendation = "REVIEW"
+    else:
+        recommendation = "ACCEPT"
 
     output_abs = os.path.abspath(output_dir)
     os.makedirs(output_abs, exist_ok=True)
@@ -233,6 +350,9 @@ def generate_quotation(
         "factory_name": factory.get("factory_name", ""),
         "material": material,
         "axis_required": required_axes,
+        "review_required": recommendation == "REVIEW",
+        "review_items": review_items,
+        "review_codes": review_codes,
         "source_files": {
             "process_plan": os.path.abspath(process_plan_path),
             "time_estimate": os.path.abspath(time_estimate_path),

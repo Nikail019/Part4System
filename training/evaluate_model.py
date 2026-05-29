@@ -69,6 +69,7 @@ def evaluate(
     data_path: str,
     out_dir: str,
     threshold: float = 0.5,
+    use_checkpoint_thresholds: bool = True,
     resolution: int = 32,
     device: str | None = None,
     max_samples: int | None = 1000,
@@ -81,13 +82,23 @@ def evaluate(
     device_name = device if device else _get_device()
     torch_device = torch.device(device_name)
     model = load_model(model_path, device=torch_device)
+    class_thresholds = {}
+    if use_checkpoint_thresholds:
+        try:
+            checkpoint = torch.load(model_path, map_location="cpu")
+            class_thresholds = checkpoint.get("class_thresholds", {})
+        except Exception:
+            class_thresholds = {}
+    threshold_tensor = torch.tensor(
+        [float(class_thresholds.get(name, threshold)) for name in FEATURE_NAMES]
+    ).view(1, -1)
 
     all_preds = []
     all_targets = []
     with torch.no_grad():
         for x, y in loader:
             probs = torch.sigmoid(model(x.to(torch_device))).cpu()
-            all_preds.append((probs >= threshold).float())
+            all_preds.append((probs >= threshold_tensor).float())
             all_targets.append(y.float())
 
     if all_preds:
@@ -108,6 +119,8 @@ def evaluate(
         "model_path": os.path.abspath(model_path),
         "data_path": os.path.abspath(data_path),
         "threshold": threshold,
+        "threshold_source": "checkpoint" if class_thresholds else "argument",
+        "class_thresholds": class_thresholds or {name: threshold for name in FEATURE_NAMES},
         "resolution": resolution,
         "device": device_name,
         "max_samples": max_samples,
@@ -131,6 +144,7 @@ def main() -> None:
     parser.add_argument("--data", required=True)
     parser.add_argument("--out", default=os.path.join("checkpoints", "eval"))
     parser.add_argument("--threshold", type=float, default=0.5)
+    parser.add_argument("--no-checkpoint-thresholds", action="store_false", dest="use_checkpoint_thresholds")
     parser.add_argument("--resolution", type=int, default=32)
     parser.add_argument("--max-samples", type=int, default=1000)
     parser.add_argument(
@@ -142,13 +156,14 @@ def main() -> None:
     device = args.device if args.device else _get_device()
     print(f"Device: {device}")
     report = evaluate(
-        args.model,
-        args.data,
-        args.out,
-        args.threshold,
-        args.resolution,
-        device,
-        args.max_samples,
+        model_path=args.model,
+        data_path=args.data,
+        out_dir=args.out,
+        threshold=args.threshold,
+        use_checkpoint_thresholds=args.use_checkpoint_thresholds,
+        resolution=args.resolution,
+        device=device,
+        max_samples=args.max_samples,
     )
     print(json.dumps(report, indent=2))
 

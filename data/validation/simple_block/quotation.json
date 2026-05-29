@@ -1,0 +1,61 @@
+{
+  "recommendation": "ACCEPT",
+  "flags": [],
+  "estimated_cost": {
+    "machining": 181.20027298850576,
+    "material": 4.4013375,
+    "subtotal": 185.60161048850577,
+    "overhead_factor": 1.15,
+    "total": 213.44185206178162,
+    "currency": "NZD"
+  },
+  "time_summary": {
+    "total_min": 90.60013649425288,
+    "machining_min": 46.60013649425288,
+    "setup_min": 30.0
+  },
+  "machine_selected": "VMC_01",
+  "capability_checks": {
+    "axis_capability": {
+      "pass": true,
+      "required": 3,
+      "best_machine_id": "VMC_01",
+      "best_machine_axes": 3
+    },
+    "work_envelope": {
+      "pass": true,
+      "part_mm": {
+        "x": 100.0,
+        "y": 60.0,
+        "z": 40.0
+      },
+      "best_machine_id": "VMC_01"
+    },
+    "material_available": {
+      "pass": true,
+      "material": "aluminium_6061",
+      "available": [
+        "aluminium_6061",
+        "mild_steel",
+        "stainless_316"
+      ]
+    },
+    "capacity": {
+      "pass": true,
+      "required_min": 90.60013649425288,
+      "available_min": 2400.0,
+      "utilisation_fraction": 0.03775005687260537
+    }
+  },
+  "factory_name": "NASH NZ",
+  "material": "aluminium_6061",
+  "axis_required": 3,
+  "source_files": {
+    "process_plan": "/Users/nikail/Part4System/data/validation/simple_block/process_plan.json",
+    "time_estimate": "/Users/nikail/Part4System/data/validation/simple_block/time_estimate.json",
+    "metadata": "/Users/nikail/Part4System/data/validation/simple_block/metadata.json",
+    "factory_profile": "/Users/nikail/Part4System/factory_profiles/nash_nz.json"
+  },
+  "quotation_file": "/Users/nikail/Part4System/data/validation/simple_block/quotation.json",
+  "warnings": []
+}

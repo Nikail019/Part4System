@@ -1,0 +1,74 @@
+{
+  "step_file": "/Users/nikail/Part4System/tests/fixtures/block_with_holes.stp",
+  "factory_profile": "/Users/nikail/Part4System/factory_profiles/nash_nz.json",
+  "material": "aluminium_6061",
+  "model_path": "/Users/nikail/Part4System/checkpoints/best.pt",
+  "output_dir": "/Users/nikail/Part4System/data/validation/block_with_holes",
+  "resolution": 32,
+  "confidence": 0.5,
+  "timestamp": "2026-05-19T15:51:34",
+  "phases_completed": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6
+  ],
+  "phases_skipped": [],
+  "phase_outputs": {
+    "1": {
+      "status": "completed",
+      "duration_sec": 0.0,
+      "voxel_file": "/Users/nikail/Part4System/data/validation/block_with_holes/voxel_32.npy",
+      "metadata_file": "/Users/nikail/Part4System/data/validation/block_with_holes/metadata.json",
+      "mesh_file": "/Users/nikail/Part4System/data/validation/block_with_holes/mesh.stl"
+    },
+    "2": {
+      "status": "completed",
+      "duration_sec": 0.0,
+      "features_file": "/Users/nikail/Part4System/data/validation/block_with_holes/features.json",
+      "feature_count": 6,
+      "model_used": "/Users/nikail/Part4System/checkpoints/best.pt"
+    },
+    "3": {
+      "status": "completed",
+      "duration_sec": 0.0,
+      "setup_analysis_file": "/Users/nikail/Part4System/data/validation/block_with_holes/setup_analysis.json",
+      "setup_count": 2,
+      "axis_requirement": 3
+    },
+    "4": {
+      "status": "completed",
+      "duration_sec": 0.0,
+      "process_plan_file": "/Users/nikail/Part4System/data/validation/block_with_holes/process_plan.json",
+      "operation_count": 11
+    },
+    "5": {
+      "status": "completed",
+      "duration_sec": 0.0,
+      "time_estimate_file": "/Users/nikail/Part4System/data/validation/block_with_holes/time_estimate.json",
+      "total_time_min": 94.7317335561142
+    },
+    "6": {
+      "status": "completed",
+      "duration_sec": 0.0,
+      "quotation_file": "/Users/nikail/Part4System/data/validation/block_with_holes/quotation.json",
+      "recommendation": "ACCEPT",
+      "total_cost": 222.94452530406264,
+      "currency": "NZD"
+    }
+  },
+  "total_duration_sec": 0.0,
+  "warnings": [],
+  "summary": {
+    "recommendation": "ACCEPT",
+    "total_cost": 222.94452530406264,
+    "currency": "NZD",
+    "total_time_min": 94.7317335561142,
+    "operation_count": 11,
+    "setup_count": 2,
+    "axis_requirement": 3,
+    "flags": []
+  }
+}

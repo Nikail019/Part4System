@@ -1,0 +1,24 @@
+{
+  "source_file": "/Users/nikail/Part4System/tests/fixtures/block_with_holes.stp",
+  "source_unit": "MM",
+  "resolution": 32,
+  "bounding_box_mm": {
+    "x": 100.0,
+    "y": 60.0,
+    "z": 40.0
+  },
+  "volume_mm3": 230579.12736831876,
+  "surface_area_mm2": 28098.47700760801,
+  "occupancy_ratio": 0.23248291015625,
+  "raw_stock_mm": {
+    "x": 115.0,
+    "y": 70.0,
+    "z": 45.0
+  },
+  "mesh_face_count": 1536,
+  "mesh_is_watertight": true,
+  "step_backend": "cadquery",
+  "voxel_file": "/Users/nikail/Part4System/data/validation/block_with_holes/voxel_32.npy",
+  "mesh_file": "/Users/nikail/Part4System/data/validation/block_with_holes/mesh.stl",
+  "warnings": []
+}

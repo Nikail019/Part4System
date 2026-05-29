@@ -1,0 +1,74 @@
+{
+  "model_path": "/Users/nikail/Part4System/checkpoints/best.pt",
+  "factory": "factory_profiles/nash_nz.json",
+  "material": "aluminium_6061",
+  "timestamp": "2026-05-19T15:51:34",
+  "fixtures": {
+    "simple_block": {
+      "status": "PASS",
+      "checks_passed": 8,
+      "checks_total": 8,
+      "features": [
+        "flat_face",
+        "chamfer",
+        "blind_hole",
+        "boss",
+        "circular_pocket",
+        "circular_slot"
+      ],
+      "operation_count": 11,
+      "setup_count": 2,
+      "axis_requirement": 3,
+      "total_time_min": 90.60013649425288,
+      "total_cost": 213.44185206178162,
+      "currency": "NZD",
+      "recommendation": "ACCEPT",
+      "failed_checks": []
+    },
+    "block_with_holes": {
+      "status": "PASS",
+      "checks_passed": 8,
+      "checks_total": 8,
+      "features": [
+        "flat_face",
+        "chamfer",
+        "blind_hole",
+        "boss",
+        "circular_pocket",
+        "circular_slot"
+      ],
+      "operation_count": 11,
+      "setup_count": 2,
+      "axis_requirement": 3,
+      "total_time_min": 94.7317335561142,
+      "total_cost": 222.94452530406264,
+      "currency": "NZD",
+      "recommendation": "ACCEPT",
+      "failed_checks": []
+    },
+    "complex_prismatic": {
+      "status": "PASS",
+      "checks_passed": 8,
+      "checks_total": 8,
+      "features": [
+        "flat_face",
+        "blind_hole",
+        "chamfer",
+        "boss",
+        "circular_slot",
+        "circular_pocket"
+      ],
+      "operation_count": 11,
+      "setup_count": 2,
+      "axis_requirement": 3,
+      "total_time_min": 151.23329022988509,
+      "total_cost": 358.02252002873564,
+      "currency": "NZD",
+      "recommendation": "ACCEPT",
+      "failed_checks": []
+    }
+  },
+  "overall_status": "PASS",
+  "fixtures_passed": 3,
+  "fixtures_total": 3
+}

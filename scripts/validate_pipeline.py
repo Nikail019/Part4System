@@ -34,10 +34,11 @@ CHECKS = [
     ("phase1", "voxel_32.npy exists", lambda d: os.path.exists(os.path.join(d, "voxel_32.npy"))),
     ("phase2", "flat_face always detected", lambda d: "flat_face" in _load_feature_types(d)),
     ("phase2", "at least 1 feature detected", lambda d: _load_json(d, "features.json").get("feature_count", 0) >= 1),
-    ("phase3", "valid setup count", lambda d: _load_json(d, "setup_analysis.json").get("setup_count", 0) >= 1),
+    ("phase3", "single 2.5D setup", lambda d: _load_json(d, "setup_analysis.json").get("setup_count") == 1),
+    ("phase3", "3-axis baseline", lambda d: _load_json(d, "setup_analysis.json").get("axis_requirement") == 3),
     ("phase4", "at least 2 operations", lambda d: _load_json(d, "process_plan.json").get("operation_count", 0) >= 2),
     ("phase5", "positive machining time", lambda d: _load_json(d, "time_estimate.json").get("total_time_min", 0) > 0),
-    ("phase6", "valid recommendation", lambda d: _load_json(d, "quotation.json").get("recommendation") in ("ACCEPT", "REJECT")),
+    ("phase6", "valid recommendation", lambda d: _load_json(d, "quotation.json").get("recommendation") in ("ACCEPT", "REVIEW", "REJECT")),
     ("phase6", "positive cost", lambda d: _load_json(d, "quotation.json").get("estimated_cost", {}).get("total", 0) > 0),
 ]
 

@@ -88,6 +88,25 @@ def test_assemble_hole_gets_dimensions_and_peck():
     assert feature["peck_required"] is True
 
 
+def test_assemble_repeats_measured_hole_instances():
+    result = assemble_feature_attributes(
+        [{"type": "through_hole", "confidence": 0.95}],
+        {"material": None, "surface_finish": [], "threads": []},
+        {
+            "holes": [
+                {"diameter_mm": 10.0, "depth_mm": 40.0},
+                {"diameter_mm": 10.0, "depth_mm": 40.0},
+                {"diameter_mm": 10.0, "depth_mm": 40.0},
+            ],
+            "planar_recesses": [],
+            "bounding_box_mm": {"x": 100, "y": 60, "z": 40},
+        },
+    )
+    holes = [feature for feature in result["features"] if feature["type"] == "through_hole"]
+    assert len(holes) == 3
+    assert [feature["instance_id"] for feature in holes] == [0, 1, 2]
+
+
 def test_assemble_shallow_hole_no_peck():
     result = assemble_feature_attributes(
         [{"type": "through_hole", "confidence": 0.85}],

@@ -117,6 +117,21 @@ def test_finishing_volume_is_smaller_than_roughing():
         assert max(finishing) < max(roughing)
 
 
+def test_removal_volume_uses_feature_instance_voxels_when_available():
+    metadata = {**MINIMAL_METADATA, "resolution": 32}
+    operations = [
+        {
+            "step": 1,
+            "feature_type": "rectangular_pocket",
+            "phase": "roughing",
+            "feature_volume_voxels": 27,
+        }
+    ]
+    volumes = estimate_removal_volumes(operations, metadata)
+    pitch = max(metadata["bounding_box_mm"].values()) / (metadata["resolution"] - 2)
+    assert abs(volumes[1] - 27 * pitch**3) < 0.01
+
+
 def test_operation_time_returns_required_keys():
     result = estimate_operation_time(
         MINIMAL_PLAN["operations"][0], removal_volume_mm3=5000.0, material="aluminium_6061"

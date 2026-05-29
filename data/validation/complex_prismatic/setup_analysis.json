@@ -1,0 +1,47 @@
+{
+  "setup_count": 2,
+  "axis_requirement": 3,
+  "setups": [
+    {
+      "id": 0,
+      "approach_direction": "+Z",
+      "rotation_from_previous": "initial",
+      "surface_voxel_count": 1856,
+      "surface_coverage_fraction": 0.7403270841643399
+    },
+    {
+      "id": 1,
+      "approach_direction": "-Z",
+      "rotation_from_previous": "flip_around_X_180",
+      "surface_voxel_count": 651,
+      "surface_coverage_fraction": 0.25967291583566016
+    }
+  ],
+  "direction_coverage": {
+    "+X": 0.1088950937375349,
+    "-X": 0.1088950937375349,
+    "+Y": 0.15676106900678102,
+    "-Y": 0.15676106900678102,
+    "+Z": 0.7403270841643399,
+    "-Z": 0.6753091344236138
+  },
+  "total_surface_voxels": 2507,
+  "covered_surface_voxels": 2507,
+  "inaccessible_surface_voxels": 0,
+  "inaccessible_fraction": 0.0,
+  "features_per_setup": {
+    "0": [
+      "flat_face",
+      "blind_hole",
+      "chamfer",
+      "boss",
+      "circular_slot",
+      "circular_pocket"
+    ],
+    "1": []
+  },
+  "voxel_file": "/Users/nikail/Part4System/data/validation/complex_prismatic/voxel_32.npy",
+  "accessibility_map_file": "/Users/nikail/Part4System/data/validation/complex_prismatic/accessibility_map.npy",
+  "surface_mask_file": "/Users/nikail/Part4System/data/validation/complex_prismatic/surface_mask.npy",
+  "warnings": []
+}

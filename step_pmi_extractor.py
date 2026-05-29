@@ -238,52 +238,63 @@ def assemble_feature_attributes(
 
     for feature in detected_features:
         feature_type = feature["type"]
-        instance_id = instance_counters.get(feature_type, 0)
-        instance_counters[feature_type] = instance_id + 1
-        ra_um = global_ra or DEFAULT_RA.get(feature_type, 3.2)
+        repeat_count = 1
+        if feature_type in hole_types and holes:
+            repeat_count = max(1, len(hole_queue))
+        elif feature_type in recess_types and recesses:
+            repeat_count = max(1, len(recess_queue))
 
-        entry = {
-            "type": feature_type,
-            "instance_id": instance_id,
-            "Ra_um": ra_um,
-            "Ra_source": global_ra_source if global_ra else "default",
-            "threaded": False,
-            "thread_spec": None,
-        }
+        for _ in range(repeat_count):
+            instance_id = instance_counters.get(feature_type, 0)
+            instance_counters[feature_type] = instance_id + 1
+            ra_um = global_ra or DEFAULT_RA.get(feature_type, 3.2)
 
-        if feature_type in hole_types:
-            if hole_queue:
-                hole = hole_queue.pop(0)
-                diameter = hole["diameter_mm"]
-                depth = hole["depth_mm"]
-            else:
-                bb = brep_data.get("bounding_box_mm", {})
-                diameter = round(min(bb.get("x", 20), bb.get("y", 20)) * 0.15, 1)
-                depth = round(bb.get("z", 40) * 0.6, 1)
-            entry["diameter_mm"] = diameter
-            entry["depth_mm"] = depth
-            entry["depth_ratio"] = round(depth / max(diameter, 0.1), 2)
-            entry["peck_required"] = entry["depth_ratio"] > PECK_DEPTH_RATIO
-            if thread_queue:
-                entry["threaded"] = True
-                entry["thread_spec"] = thread_queue.pop(0)
+            entry = {
+                "type": feature_type,
+                "instance_id": instance_id,
+                "Ra_um": ra_um,
+                "Ra_source": global_ra_source if global_ra else "default",
+                "threaded": False,
+                "thread_spec": None,
+            }
 
-        elif feature_type in recess_types:
-            if recess_queue:
-                recess = recess_queue.pop(0)
-                entry["width_mm"] = recess["width_mm"]
-                entry["length_mm"] = recess["length_mm"]
-                entry["depth_mm"] = recess["depth_mm"]
-                doc = ROUGH_DOC_MM.get(material, 2.0)
-                entry["rough_passes"] = max(1, int((recess["depth_mm"] / doc) + 0.5))
-            else:
-                bb = brep_data.get("bounding_box_mm", {})
-                entry["width_mm"] = round(bb.get("x", 50) * 0.4, 1)
-                entry["length_mm"] = round(bb.get("y", 40) * 0.4, 1)
-                entry["depth_mm"] = round(bb.get("z", 30) * 0.3, 1)
-                entry["rough_passes"] = 2
+            if feature_type in hole_types:
+                if hole_queue:
+                    hole = hole_queue.pop(0)
+                    diameter = hole["diameter_mm"]
+                    depth = hole["depth_mm"]
+                    entry["dimension_source"] = "brep"
+                else:
+                    bb = brep_data.get("bounding_box_mm", {})
+                    diameter = round(min(bb.get("x", 20), bb.get("y", 20)) * 0.15, 1)
+                    depth = round(bb.get("z", 40) * 0.6, 1)
+                    entry["dimension_source"] = "fallback"
+                entry["diameter_mm"] = diameter
+                entry["depth_mm"] = depth
+                entry["depth_ratio"] = round(depth / max(diameter, 0.1), 2)
+                entry["peck_required"] = entry["depth_ratio"] > PECK_DEPTH_RATIO
+                if thread_queue:
+                    entry["threaded"] = True
+                    entry["thread_spec"] = thread_queue.pop(0)
 
-        features_out.append(entry)
+            elif feature_type in recess_types:
+                if recess_queue:
+                    recess = recess_queue.pop(0)
+                    entry["width_mm"] = recess["width_mm"]
+                    entry["length_mm"] = recess["length_mm"]
+                    entry["depth_mm"] = recess["depth_mm"]
+                    entry["dimension_source"] = "brep"
+                    doc = ROUGH_DOC_MM.get(material, 2.0)
+                    entry["rough_passes"] = max(1, int((recess["depth_mm"] / doc) + 0.5))
+                else:
+                    bb = brep_data.get("bounding_box_mm", {})
+                    entry["width_mm"] = round(bb.get("x", 50) * 0.4, 1)
+                    entry["length_mm"] = round(bb.get("y", 40) * 0.4, 1)
+                    entry["depth_mm"] = round(bb.get("z", 30) * 0.3, 1)
+                    entry["dimension_source"] = "fallback"
+                    entry["rough_passes"] = 2
+
+            features_out.append(entry)
 
     return {
         "material": material,

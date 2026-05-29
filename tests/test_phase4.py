@@ -249,16 +249,33 @@ def test_operation_required_keys(input_files):
     )
     required = {
         "step",
+        "operation_id",
         "setup_id",
         "approach_direction",
         "feature_type",
+        "feature_instance_id",
         "operation_type",
         "tool_type",
+        "tool_diameter_mm",
+        "cut_depth_mm",
+        "estimated_removal_volume_mm3",
+        "requires_review",
         "phase",
         "notes",
     }
     for op in result["operations"]:
-        assert required.issubset(op.keys())
+        missing = required - set(op.keys())
+        assert not missing, f"Missing operation keys: {missing}"
+
+
+def test_operation_id_matches_step(input_files):
+    result = generate_process_plan(
+        input_files["metadata"],
+        input_files["features"],
+        input_files["setup"],
+        input_files["out"],
+    )
+    assert all(op["operation_id"] == op["step"] for op in result["operations"])
 
 
 def test_axis_requirement_passed_through(input_files):
@@ -278,7 +295,20 @@ def test_setup_count_passed_through(input_files):
         input_files["setup"],
         input_files["out"],
     )
-    assert result["setup_count"] == SIMPLE_SETUP["setup_count"]
+    assert result["setup_count"] == 1
+
+
+def test_process_plan_operations_are_top_side_only(input_files):
+    result = generate_process_plan(
+        input_files["metadata"],
+        input_files["features"],
+        input_files["setup"],
+        input_files["out"],
+    )
+    assert result["setup_mode"] == "2.5d_single_setup"
+    assert result["setups"][0]["approach_direction"] == "+Z"
+    assert all(op["setup_id"] == 0 for op in result["operations"])
+    assert all(op["approach_direction"] == "+Z" for op in result["operations"])
 
 
 def test_confidence_threshold_filters_features(input_files, tmp_path):
@@ -365,6 +395,146 @@ def test_written_json_is_valid(input_files):
     with open(result["process_plan_file"], encoding="utf-8") as f:
         on_disk = json.load(f)
     assert on_disk["operation_count"] == result["operation_count"]
+
+
+def test_process_plan_uses_feature_instances_when_available(input_files, tmp_path):
+    setup = copy.deepcopy(SIMPLE_SETUP)
+    setup["feature_instances_per_setup"] = {
+        "0": [
+            {
+                "type": "rectangular_pocket",
+                "instance_id": 2,
+                "confidence": 0.9,
+                "primary_direction": "+Z",
+                "volume_voxels": 120,
+                "localisation_status": "localised",
+            }
+        ],
+        "1": [],
+    }
+    setup_path = tmp_path / "setup_with_instances.json"
+    setup_path.write_text(json.dumps(setup))
+    result = generate_process_plan(
+        input_files["metadata"],
+        input_files["features"],
+        str(setup_path),
+        input_files["out"],
+    )
+    assert result["operation_count"] > 0
+    assert all(op.get("feature_instance_id") == 2 for op in result["operations"])
+    assert all(op.get("feature_volume_voxels") == 120 for op in result["operations"])
+    assert all(op.get("estimated_removal_volume_mm3") is not None for op in result["operations"])
+    assert all(op.get("requires_review") is False for op in result["operations"])
+
+
+def test_process_plan_generates_operations_for_multiple_hole_instances(input_files, tmp_path):
+    setup = copy.deepcopy(SIMPLE_SETUP)
+    setup["feature_instances_per_setup"] = {
+        "0": [
+            {
+                "type": "through_hole",
+                "instance_id": 0,
+                "confidence": 0.99,
+                "primary_direction": "+Z",
+                "access_directions": ["+Z", "-Z"],
+                "volume_voxels": 60,
+                "localisation_status": "localised",
+                "two_point_five_d_supported": True,
+            },
+            {
+                "type": "through_hole",
+                "instance_id": 1,
+                "confidence": 0.99,
+                "primary_direction": "+Z",
+                "access_directions": ["+Z", "-Z"],
+                "volume_voxels": 60,
+                "localisation_status": "localised",
+                "two_point_five_d_supported": True,
+            },
+            {
+                "type": "through_hole",
+                "instance_id": 2,
+                "confidence": 0.99,
+                "primary_direction": "+Z",
+                "access_directions": ["+Z", "-Z"],
+                "volume_voxels": 60,
+                "localisation_status": "localised",
+                "two_point_five_d_supported": True,
+            },
+        ]
+    }
+    setup_path = tmp_path / "setup_multi_holes.json"
+    setup_path.write_text(json.dumps(setup))
+    result = generate_process_plan(
+        input_files["metadata"],
+        input_files["features"],
+        str(setup_path),
+        input_files["out"],
+    )
+    drill_ops = [op for op in result["operations"] if op["operation_type"] == "drill"]
+    assert len(drill_ops) == 3
+    assert {op["feature_instance_id"] for op in drill_ops} == {0, 1, 2}
+
+
+def test_process_plan_skips_unsupported_25d_instance(input_files, tmp_path):
+    setup = copy.deepcopy(SIMPLE_SETUP)
+    setup["two_point_five_d_compatible"] = False
+    setup["unsupported_reasons"] = ["rectangular_pocket instance 3 requires side access."]
+    setup["feature_instances_per_setup"] = {
+        "0": [
+            {
+                "type": "rectangular_pocket",
+                "instance_id": 3,
+                "confidence": 0.9,
+                "primary_direction": "+X",
+                "access_directions": ["+X"],
+                "volume_voxels": 120,
+                "localisation_status": "localised",
+                "two_point_five_d_supported": False,
+                "unsupported_reason": "rectangular_pocket instance 3 requires side access.",
+            }
+        ],
+        "1": [],
+    }
+    setup_path = tmp_path / "setup_with_unsupported_instances.json"
+    setup_path.write_text(json.dumps(setup))
+    result = generate_process_plan(
+        input_files["metadata"],
+        input_files["features"],
+        str(setup_path),
+        input_files["out"],
+    )
+    assert result["two_point_five_d_compatible"] is False
+    assert result["unsupported_reasons"]
+    assert "UNSUPPORTED_25D_INSTANCE" in result["review_codes"]
+    assert result["review_items"]
+    assert all(op.get("feature_instance_id") != 3 for op in result["operations"])
+
+
+def test_process_plan_preserves_setup_review_codes(input_files, tmp_path):
+    setup = copy.deepcopy(SIMPLE_SETUP)
+    setup["two_point_five_d_compatible"] = False
+    setup["tool_reach_compatible"] = False
+    setup["review_items"] = [
+        {
+            "code": "TOOL_REACH_LIMIT",
+            "severity": "review",
+            "message": "rectangular_pocket instance 0 exceeds tool reach.",
+            "source": "phase3_setup_analysis",
+        }
+    ]
+    setup["feature_feasibility"] = [{"instance_id": 0, "tool_reach_ok": False}]
+    setup_path = tmp_path / "setup_review.json"
+    setup_path.write_text(json.dumps(setup))
+    result = generate_process_plan(
+        input_files["metadata"],
+        input_files["features"],
+        str(setup_path),
+        input_files["out"],
+    )
+    assert result["tool_reach_compatible"] is False
+    assert "TOOL_REACH_LIMIT" in result["review_codes"]
+    assert result["feature_feasibility"] == setup["feature_feasibility"]
 
 
 @pytest.mark.skipif(

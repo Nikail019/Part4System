@@ -29,18 +29,18 @@ PHASE_NAMES = {
 
 PHASE_OUTPUT_FILES = {
     1: ["voxel_64.npy", "metadata.json", "mesh.stl"],
-    2: ["features.json", "pmi_data.json"],
+    2: ["features.json", "pmi_data.json", "feature_instances.json"],
     3: ["setup_analysis.json", "accessibility_map.npy", "surface_mask.npy"],
-    4: ["process_plan.json"],
+    4: ["process_plan.json", "simulation_input.json"],
     5: ["time_estimate.json"],
     6: ["quotation.json"],
 }
 
 PHASE_PATH_KEYS = {
     1: ["voxel_file", "metadata_file", "mesh_file"],
-    2: ["features_file", "pmi_data_file"],
+    2: ["features_file", "pmi_data_file", "feature_instances_file"],
     3: ["setup_analysis_file"],
-    4: ["process_plan_file"],
+    4: ["process_plan_file", "simulation_input_file"],
     5: ["time_estimate_file"],
     6: ["quotation_file"],
 }
@@ -124,8 +124,13 @@ def run_phase1(args: argparse.Namespace, paths: dict) -> dict:
 
 
 def run_phase2(args: argparse.Namespace, paths: dict) -> dict:
-    from phase2_feature_recognition import recognise_features
-    from step_pmi_extractor import extract_pmi
+    from phase2_feature_recognition import (
+        fuse_features_with_voxel_geometry,
+        recognise_features,
+        reconcile_features_with_brep,
+    )
+    from phase2c_feature_localisation import localise_feature_instances
+    from step_pmi_extractor import extract_pmi, measure_brep_features
 
     t0 = time.time()
     voxel_file = paths["voxel_file"]
@@ -141,6 +146,9 @@ def run_phase2(args: argparse.Namespace, paths: dict) -> dict:
             "Or specify a checkpoint with --model path/to/model.pt"
         )
     result = recognise_features(voxel_file, model_used, threshold=args.confidence)
+    brep_data = measure_brep_features(args.step_file)
+    result = reconcile_features_with_brep(result, brep_data)
+    result = fuse_features_with_voxel_geometry(result, voxel_file)
     _write_json_atomic(result, features_path)
     pmi_result = extract_pmi(
         args.step_file,
@@ -148,13 +156,21 @@ def run_phase2(args: argparse.Namespace, paths: dict) -> dict:
         args.output,
         default_material=args.material,
     )
+    instance_result = localise_feature_instances(
+        voxel_file,
+        features_path,
+        args.output,
+        pmi_data_path=pmi_result["pmi_data_file"],
+    )
     warnings = list(pmi_result.get("warnings", []))
     return {
         "features_file": features_path,
         "pmi_data_file": pmi_result["pmi_data_file"],
+        "feature_instances_file": instance_result["feature_instances_file"],
         "feature_count": result["feature_count"],
+        "instance_count": instance_result["instance_count"],
         "model_used": model_used,
-        "warnings": warnings,
+        "warnings": warnings + list(instance_result.get("warnings", [])),
         "duration_sec": round(time.time() - t0, 2),
     }
 
@@ -163,7 +179,14 @@ def run_phase3(args: argparse.Namespace, paths: dict) -> dict:
     from phase3_setup_analysis import analyse_setups
 
     t0 = time.time()
-    result = analyse_setups(paths["voxel_file"], args.output, features_path=paths.get("features_file"))
+    result = analyse_setups(
+        paths["voxel_file"],
+        args.output,
+        features_path=paths.get("features_file"),
+        feature_instances_path=paths.get("feature_instances_file"),
+        metadata_path=paths.get("metadata_file"),
+        pmi_data_path=paths.get("pmi_data_file"),
+    )
     return {
         "setup_analysis_file": os.path.join(os.path.abspath(args.output), "setup_analysis.json"),
         "setup_count": result["setup_count"],
@@ -174,6 +197,7 @@ def run_phase3(args: argparse.Namespace, paths: dict) -> dict:
 
 def run_phase4(args: argparse.Namespace, paths: dict) -> dict:
     from phase4_process_plan import generate_process_plan
+    from simulation_handoff import generate_simulation_input
 
     t0 = time.time()
     result = generate_process_plan(
@@ -183,10 +207,24 @@ def run_phase4(args: argparse.Namespace, paths: dict) -> dict:
         args.output,
         confidence_threshold=args.confidence,
         pmi_data_path=paths.get("pmi_data_file"),
+        feature_instances_path=paths.get("feature_instances_file"),
+    )
+    simulation = generate_simulation_input(
+        paths["metadata_file"],
+        paths["features_file"],
+        paths.get("feature_instances_file"),
+        paths["setup_analysis_file"],
+        result["process_plan_file"],
+        args.output,
+        pmi_data_path=paths.get("pmi_data_file"),
     )
     return {
         "process_plan_file": result["process_plan_file"],
+        "simulation_input_file": simulation["simulation_input_file"],
+        "simulation_ready": simulation["readiness"]["ready_for_simulation"],
+        "simulation_recommendation": simulation["readiness"]["recommendation"],
         "operation_count": result["operation_count"],
+        "warnings": simulation["readiness"].get("warnings", []),
         "duration_sec": round(time.time() - t0, 2),
     }
 
@@ -271,8 +309,10 @@ def _collect_existing_paths(args: argparse.Namespace) -> dict:
         "mesh_file": os.path.join(output, "mesh.stl"),
         "features_file": os.path.join(output, "features.json"),
         "pmi_data_file": os.path.join(output, "pmi_data.json"),
+        "feature_instances_file": os.path.join(output, "feature_instances.json"),
         "setup_analysis_file": os.path.join(output, "setup_analysis.json"),
         "process_plan_file": os.path.join(output, "process_plan.json"),
+        "simulation_input_file": os.path.join(output, "simulation_input.json"),
         "time_estimate_file": os.path.join(output, "time_estimate.json"),
         "quotation_file": os.path.join(output, "quotation.json"),
     }
@@ -290,9 +330,13 @@ def _update_paths_from_cache(phase: int, args: argparse.Namespace, paths: dict) 
         2: {
             "features_file": os.path.join(output, "features.json"),
             "pmi_data_file": os.path.join(output, "pmi_data.json"),
+            "feature_instances_file": os.path.join(output, "feature_instances.json"),
         },
         3: {"setup_analysis_file": os.path.join(output, "setup_analysis.json")},
-        4: {"process_plan_file": os.path.join(output, "process_plan.json")},
+        4: {
+            "process_plan_file": os.path.join(output, "process_plan.json"),
+            "simulation_input_file": os.path.join(output, "simulation_input.json"),
+        },
         5: {"time_estimate_file": os.path.join(output, "time_estimate.json")},
         6: {"quotation_file": os.path.join(output, "quotation.json")},
     }
@@ -355,7 +399,9 @@ def _phase_cached_result(phase: int, args: argparse.Namespace, paths: dict) -> d
         output = {
             "features_file": paths["features_file"],
             "pmi_data_file": paths.get("pmi_data_file"),
+            "feature_instances_file": paths.get("feature_instances_file"),
             "feature_count": features.get("feature_count", 0),
+            "instance_count": _read_json_if_exists(paths.get("feature_instances_file")).get("instance_count", 0),
             "model_used": features.get("model_path"),
         }
     elif phase == 3:
@@ -367,8 +413,12 @@ def _phase_cached_result(phase: int, args: argparse.Namespace, paths: dict) -> d
         }
     elif phase == 4:
         plan = _read_json_if_exists(paths["process_plan_file"])
+        simulation = _read_json_if_exists(paths.get("simulation_input_file"))
         output = {
             "process_plan_file": paths["process_plan_file"],
+            "simulation_input_file": paths.get("simulation_input_file"),
+            "simulation_ready": simulation.get("readiness", {}).get("ready_for_simulation"),
+            "simulation_recommendation": simulation.get("readiness", {}).get("recommendation"),
             "operation_count": plan.get("operation_count"),
         }
     elif phase == 5:
@@ -456,7 +506,7 @@ def run_pipeline(args: argparse.Namespace) -> dict:
 def print_summary(manifest: dict) -> None:
     summary = manifest.get("summary", {})
     recommendation = summary.get("recommendation", "UNKNOWN")
-    symbol = "OK" if recommendation == "ACCEPT" else "NO"
+    symbol = "OK" if recommendation == "ACCEPT" else ("REVIEW" if recommendation == "REVIEW" else "NO")
     currency = summary.get("currency", "")
     cost = summary.get("total_cost")
     time_min = summary.get("total_time_min")

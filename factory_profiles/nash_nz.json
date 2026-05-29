@@ -37,5 +37,16 @@
   ],
   "weekly_capacity_hours": 40,
   "overhead_factor": 1.15,
+  "tool_library": [
+    {"tool_type": "face_mill", "diameter_mm": 50.0, "max_depth_mm": 3.0},
+    {"tool_type": "centre_drill", "diameter_mm": 3.0, "max_depth_mm": 10.0},
+    {"tool_type": "twist_drill", "diameter_mm": 10.0, "max_depth_mm": 80.0},
+    {"tool_type": "flat_endmill", "diameter_mm": 10.0, "max_depth_mm": 50.0},
+    {"tool_type": "shoulder_mill", "diameter_mm": 16.0, "max_depth_mm": 60.0},
+    {"tool_type": "chamfer_mill", "diameter_mm": 8.0, "max_depth_mm": 20.0},
+    {"tool_type": "ball_endmill", "diameter_mm": 8.0, "max_depth_mm": 40.0},
+    {"tool_type": "tap", "diameter_mm": 10.0, "max_depth_mm": 40.0},
+    {"tool_type": "boring_bar", "diameter_mm": 10.0, "max_depth_mm": 80.0}
+  ],
   "notes": "Example NASH NZ factory profile for RPP MVP validation"
 }

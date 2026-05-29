@@ -12,6 +12,7 @@ from phase3_setup_analysis import (
     compute_surface_mask,
     greedy_setup_assignment,
     infer_axis_requirement,
+    map_feature_instances_to_setups,
     map_features_to_setups,
 )
 
@@ -219,6 +220,26 @@ def test_axis_requirement_empty():
     assert infer_axis_requirement([]) == 3
 
 
+def test_map_feature_instances_to_matching_setup_direction():
+    setups = [
+        {"id": 0, "approach_direction": "+Z"},
+        {"id": 1, "approach_direction": "-Z"},
+    ]
+    instances = [
+        {
+            "type": "through_hole",
+            "instance_id": 0,
+            "confidence": 0.9,
+            "primary_direction": "-Z",
+            "access_directions": ["-Z", "+Z"],
+            "volume_voxels": 20,
+            "localisation_status": "localised",
+        }
+    ]
+    result = map_feature_instances_to_setups(setups, instances)
+    assert result["1"][0]["type"] == "through_hole"
+
+
 @pytest.mark.skipif(not os.path.exists(FIXTURE_VOXEL), reason="Phase 1 CLI output not available")
 def test_analyse_setups_output_files(tmp_path):
     analyse_setups(FIXTURE_VOXEL, str(tmp_path))
@@ -247,6 +268,38 @@ def test_analyse_setups_schema(tmp_path):
     ]
     for key in required:
         assert key in result
+
+
+@pytest.mark.skipif(not os.path.exists(FIXTURE_VOXEL), reason="Phase 1 CLI output not available")
+def test_analyse_setups_with_feature_instances(tmp_path):
+    features_path = tmp_path / "features.json"
+    instances_path = tmp_path / "feature_instances.json"
+    features_path.write_text(json.dumps({"features": [{"type": "flat_face", "confidence": 1.0}]}))
+    instances_path.write_text(
+        json.dumps(
+            {
+                "instances": [
+                    {
+                        "type": "flat_face",
+                        "instance_id": 0,
+                        "confidence": 1.0,
+                        "primary_direction": "+Z",
+                        "access_directions": ["+Z"],
+                        "volume_voxels": 0,
+                        "localisation_status": "estimated",
+                    }
+                ]
+            }
+        )
+    )
+    result = analyse_setups(
+        FIXTURE_VOXEL,
+        str(tmp_path),
+        features_path=str(features_path),
+        feature_instances_path=str(instances_path),
+    )
+    assert "feature_instances_per_setup" in result
+    assert result["feature_instances_per_setup"]["0"][0]["instance_id"] == 0
 
 
 @pytest.mark.skipif(not os.path.exists(FIXTURE_VOXEL), reason="Phase 1 CLI output not available")
@@ -304,6 +357,148 @@ def test_analyse_setups_output_paths_absolute(tmp_path):
     assert os.path.isabs(result["voxel_file"])
     assert os.path.isabs(result["accessibility_map_file"])
     assert os.path.isabs(result["surface_mask_file"])
+
+
+def test_analyse_setups_defaults_to_single_top_setup(tmp_path):
+    voxel_path = tmp_path / "block.npy"
+    np.save(voxel_path, make_solid_cube(16))
+    result = analyse_setups(str(voxel_path), str(tmp_path))
+    assert result["setup_mode"] == "2.5d_single_setup"
+    assert result["setup_count"] == 1
+    assert result["axis_requirement"] == 3
+    assert result["requires_rotation"] is False
+    assert result["setups"] == [
+        {
+            "id": 0,
+            "approach_direction": "+Z",
+            "rotation_from_previous": "initial",
+            "surface_voxel_count": result["setups"][0]["surface_voxel_count"],
+            "surface_coverage_fraction": result["setups"][0]["surface_coverage_fraction"],
+        }
+    ]
+
+
+def test_analyse_setups_side_only_instance_sets_review(tmp_path):
+    voxel_path = tmp_path / "block.npy"
+    instances_path = tmp_path / "feature_instances.json"
+    np.save(voxel_path, make_solid_cube(16))
+    instances_path.write_text(
+        json.dumps(
+            {
+                "instances": [
+                    {
+                        "type": "rectangular_pocket",
+                        "instance_id": 0,
+                        "confidence": 0.9,
+                        "primary_direction": "+X",
+                        "access_directions": ["+X"],
+                        "volume_voxels": 30,
+                        "localisation_status": "localised",
+                    }
+                ]
+            }
+        )
+    )
+    result = analyse_setups(
+        str(voxel_path),
+        str(tmp_path),
+        feature_instances_path=str(instances_path),
+    )
+    assert result["two_point_five_d_compatible"] is False
+    assert result["unsupported_reasons"]
+    assert "SIDE_ACCESS_REQUIRED" in result["review_codes"]
+    assert result["review_items"][0]["code"] == "SIDE_ACCESS_REQUIRED"
+    assert result["feature_instances_per_setup"]["0"][0]["two_point_five_d_supported"] is False
+
+
+def test_analyse_setups_tool_reach_review_with_metadata(tmp_path):
+    voxel_path = tmp_path / "block.npy"
+    metadata_path = tmp_path / "metadata.json"
+    instances_path = tmp_path / "feature_instances.json"
+    np.save(voxel_path, make_solid_cube(32))
+    metadata_path.write_text(json.dumps({"bounding_box_mm": {"x": 320.0, "y": 320.0, "z": 320.0}}))
+    instances_path.write_text(
+        json.dumps(
+            {
+                "instances": [
+                    {
+                        "type": "rectangular_pocket",
+                        "instance_id": 0,
+                        "confidence": 0.9,
+                        "primary_direction": "+Z",
+                        "access_directions": ["+Z"],
+                        "volume_voxels": 100,
+                        "localisation_status": "localised",
+                        "top_accessible": True,
+                        "opening_span_voxels": 2,
+                        "depth_voxels": 20,
+                    }
+                ]
+            }
+        )
+    )
+    result = analyse_setups(
+        str(voxel_path),
+        str(tmp_path),
+        feature_instances_path=str(instances_path),
+        metadata_path=str(metadata_path),
+    )
+    assert result["tool_reach_compatible"] is False
+    assert "TOOL_REACH_LIMIT" in result["review_codes"]
+    assert result["feature_feasibility"][0]["estimated_depth_mm"] is not None
+
+
+def test_analyse_setups_tool_reach_uses_pmi_dimensions(tmp_path):
+    voxel_path = tmp_path / "block.npy"
+    metadata_path = tmp_path / "metadata.json"
+    pmi_path = tmp_path / "pmi_data.json"
+    instances_path = tmp_path / "feature_instances.json"
+    np.save(voxel_path, make_solid_cube(32))
+    metadata_path.write_text(json.dumps({"bounding_box_mm": {"x": 100.0, "y": 60.0, "z": 40.0}}))
+    instances_path.write_text(
+        json.dumps(
+            {
+                "instances": [
+                    {
+                        "type": "through_hole",
+                        "instance_id": 0,
+                        "confidence": 0.99,
+                        "primary_direction": "+Z",
+                        "access_directions": ["+Z", "-Z"],
+                        "volume_voxels": 100,
+                        "localisation_status": "localised",
+                        "top_accessible": True,
+                        "opening_span_voxels": 1,
+                        "depth_voxels": 13,
+                    }
+                ]
+            }
+        )
+    )
+    pmi_path.write_text(
+        json.dumps(
+            {
+                "features": [
+                    {
+                        "type": "through_hole",
+                        "instance_id": 0,
+                        "diameter_mm": 10.0,
+                        "depth_mm": 40.0,
+                    }
+                ]
+            }
+        )
+    )
+    result = analyse_setups(
+        str(voxel_path),
+        str(tmp_path),
+        feature_instances_path=str(instances_path),
+        metadata_path=str(metadata_path),
+        pmi_data_path=str(pmi_path),
+    )
+    assert result["tool_reach_compatible"] is True
+    assert result["feature_feasibility"][0]["dimension_source"] == "pmi_brep"
+    assert result["feature_feasibility"][0]["aspect_ratio"] == 4.0
 
 
 def test_analyse_setups_file_not_found():
