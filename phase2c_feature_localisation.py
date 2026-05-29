@@ -68,6 +68,13 @@ def _load_pmi_features(pmi_data_path: str | None) -> dict[str, list[dict]]:
     return result
 
 
+def _brep_inferred_entries(entries: list[dict]) -> bool:
+    """Return True when PMI entries came from approximate B-rep measurement."""
+    if not entries:
+        return False
+    return all(entry.get("dimension_source") in {"brep", "fallback"} for entry in entries)
+
+
 def _occupied_bbox(grid: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     coords = np.argwhere(grid)
     if coords.size == 0:
@@ -298,7 +305,20 @@ def localise_feature_instances(
             continue
 
         pmi_entries = pmi_by_type.get(feature_type, [])
-        repeat_count = max(1, len(pmi_entries)) if feature_type in LOCALISABLE_TYPES else 1
+        repeat_count = 1
+        if feature_type in LOCALISABLE_TYPES:
+            desired_count = max(1, len(pmi_entries))
+            available_components = max(0, len(components) - len(used_components))
+            if _brep_inferred_entries(pmi_entries) and available_components > 0:
+                repeat_count = min(desired_count, available_components)
+                if desired_count > repeat_count:
+                    warnings.append(
+                        f"B-rep inferred {desired_count} {feature_type} instances but only "
+                        f"{available_components} removal components were localised; ignoring "
+                        "unlocalised inferred instances."
+                    )
+            else:
+                repeat_count = desired_count
 
         for repeat_idx in range(repeat_count):
             instance_id = counters.get(feature_type, 0)

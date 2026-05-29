@@ -154,6 +154,23 @@ select {
   padding: 10px;
 }
 
+.operation-item {
+  cursor: pointer;
+  width: 100%;
+  color: var(--text);
+  text-align: left;
+}
+
+.operation-item.active {
+  border-color: var(--accent);
+  background: rgba(84, 183, 167, 0.1);
+}
+
+.operation-item.review.active {
+  border-color: var(--warn);
+  background: rgba(242, 184, 75, 0.1);
+}
+
 .job-item {
   cursor: pointer;
 }
@@ -245,6 +262,10 @@ select {
 
 .swatch.feature {
   background: #f2b84b;
+}
+
+.swatch.operation {
+  background: #58d0ff;
 }
 
 .swatch.review {

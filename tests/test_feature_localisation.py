@@ -132,6 +132,56 @@ def test_localise_expands_instances_from_pmi(tmp_path):
     assert all(instance["diameter_mm"] == 10.0 for instance in holes)
 
 
+def test_localise_caps_brep_inferred_instances_to_components(tmp_path):
+    voxel_path, features_path = write_inputs(
+        tmp_path,
+        make_block_with_through_hole(),
+        [{"type": "through_hole", "confidence": 0.99}],
+    )
+    pmi_path = tmp_path / "pmi_data.json"
+    pmi_path.write_text(
+        json.dumps(
+            {
+                "features": [
+                    {
+                        "type": "through_hole",
+                        "instance_id": 0,
+                        "diameter_mm": 10.0,
+                        "depth_mm": 40.0,
+                        "dimension_source": "brep",
+                    },
+                    {
+                        "type": "through_hole",
+                        "instance_id": 1,
+                        "diameter_mm": 10.0,
+                        "depth_mm": 40.0,
+                        "dimension_source": "brep",
+                    },
+                    {
+                        "type": "through_hole",
+                        "instance_id": 2,
+                        "diameter_mm": 10.0,
+                        "depth_mm": 40.0,
+                        "dimension_source": "brep",
+                    },
+                ]
+            }
+        )
+    )
+
+    result = localise_feature_instances(
+        voxel_path,
+        features_path,
+        str(tmp_path),
+        pmi_data_path=str(pmi_path),
+    )
+
+    holes = [instance for instance in result["instances"] if instance["type"] == "through_hole"]
+    assert len(holes) == 1
+    assert holes[0]["localisation_status"] == "localised"
+    assert any("B-rep inferred 3 through_hole instances" in warning for warning in result["warnings"])
+
+
 def test_missing_inputs_raise(tmp_path):
     voxel_path, features_path = write_inputs(
         tmp_path,

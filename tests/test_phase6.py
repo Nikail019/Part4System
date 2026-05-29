@@ -219,6 +219,55 @@ def test_recommendation_accept_on_capable_factory(input_files):
     assert result["flags"] == []
 
 
+def test_recommendation_review_on_operation_review_flag(input_files, tmp_path):
+    review_plan = copy.deepcopy(MINIMAL_PLAN)
+    review_plan["operations"] = [
+        {
+            "operation_id": 1,
+            "feature_type": "boss",
+            "feature_instance_id": 0,
+            "requires_review": True,
+        }
+    ]
+    plan_path = tmp_path / "plan_operation_review.json"
+    plan_path.write_text(json.dumps(review_plan))
+
+    result = generate_quotation(
+        str(plan_path),
+        input_files["time"],
+        input_files["meta"],
+        input_files["factory"],
+        input_files["out"],
+    )
+
+    assert result["recommendation"] == "REVIEW"
+    assert "OPERATION_REQUIRES_REVIEW" in result["review_codes"]
+
+
+def test_flat_face_review_operation_does_not_block_accept(input_files, tmp_path):
+    review_plan = copy.deepcopy(MINIMAL_PLAN)
+    review_plan["operations"] = [
+        {
+            "operation_id": 1,
+            "feature_type": "flat_face",
+            "feature_instance_id": 0,
+            "requires_review": True,
+        }
+    ]
+    plan_path = tmp_path / "plan_flat_face.json"
+    plan_path.write_text(json.dumps(review_plan))
+
+    result = generate_quotation(
+        str(plan_path),
+        input_files["time"],
+        input_files["meta"],
+        input_files["factory"],
+        input_files["out"],
+    )
+
+    assert result["recommendation"] == "ACCEPT"
+
+
 def test_recommendation_review_on_25d_incompatibility(input_files, tmp_path):
     review_plan = copy.deepcopy(MINIMAL_PLAN)
     review_plan["two_point_five_d_compatible"] = False

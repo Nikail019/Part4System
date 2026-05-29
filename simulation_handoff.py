@@ -248,6 +248,25 @@ def _readiness_checks(
         )
     if not operations:
         errors.append("No process operations available for simulation.")
+    for operation in operations:
+        if not operation.get("requires_review"):
+            continue
+        feature_type = str(operation.get("feature_type", "unknown"))
+        if feature_type == "flat_face":
+            continue
+        review_items.append(
+            {
+                "code": "SIM_OPERATION_REQUIRES_REVIEW",
+                "severity": "review",
+                "message": (
+                    f"Operation {operation.get('operation_id')} for {feature_type} "
+                    f"instance {operation.get('feature_instance_id')} requires review."
+                ),
+                "operation_id": operation.get("operation_id"),
+                "feature_type": feature_type,
+                "instance_id": operation.get("feature_instance_id"),
+            }
+        )
 
     instance_count = int(feature_instances.get("instance_count", len(feature_instances.get("instances", [])) or 0))
     operation_instances = [

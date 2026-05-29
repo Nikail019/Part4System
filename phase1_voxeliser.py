@@ -233,6 +233,17 @@ def _convert_geometry(raw: dict, multiplier: float) -> tuple[dict, float, float]
     return bbox_mm, volume_mm3, surface_area_mm2
 
 
+def _backend_geometry_multiplier(declared_multiplier: float) -> float:
+    """Return the extra multiplier needed after STEP import.
+
+    CadQuery/pythonOCC import through OCCT, which normalises STEP length units
+    into millimetres while building the shape. The declared unit is still
+    useful metadata, but applying it again makes metre-authored AP242 files
+    1000x too large.
+    """
+    return 1.0
+
+
 def process_step_file(
     step_path: str,
     output_dir: str,
@@ -255,9 +266,10 @@ def process_step_file(
     metadata_path = os.path.join(output_abs, "metadata.json")
 
     multiplier, source_unit, detected_unit = _detect_unit_multiplier(step_abs)
+    geometry_multiplier = _backend_geometry_multiplier(multiplier)
     parser = _parse_step_occ if _STEP_BACKEND == "occ" else _parse_step_cadquery
     raw = parser(step_abs, stl_path)
-    bbox_mm, volume_mm3, surface_area_mm2 = _convert_geometry(raw, multiplier)
+    bbox_mm, volume_mm3, surface_area_mm2 = _convert_geometry(raw, geometry_multiplier)
 
     grid, mesh_is_watertight = _voxelise_mesh(stl_path, resolution)
     np.save(voxel_path, grid)
@@ -266,6 +278,10 @@ def process_step_file(
     warnings: list[str] = []
     if not detected_unit:
         warnings.append("STEP unit not detected; assuming millimetres.")
+    elif multiplier != geometry_multiplier:
+        warnings.append(
+            f"STEP declares {source_unit}; STEP backend normalised geometry to millimetres."
+        )
     if not mesh_is_watertight:
         warnings.append("Mesh is not watertight after repair attempt.")
 

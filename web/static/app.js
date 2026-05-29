@@ -15,6 +15,8 @@ const state = {
   surfaceObject: null,
   featureObject: null,
   approachObject: null,
+  operationObject: null,
+  selectedOperationId: null,
 };
 
 const els = {
@@ -160,6 +162,222 @@ function createApproachOverlay(setupOverlay) {
   return group;
 }
 
+function getOperations(data = state.viewerData) {
+  return data?.simulation_input?.operations || data?.process_plan?.operations || [];
+}
+
+function operationKey(operation) {
+  return String(operation?.operation_id ?? operation?.step ?? "");
+}
+
+function selectedOperation(data = state.viewerData) {
+  const operations = getOperations(data);
+  return operations.find((operation) => operationKey(operation) === String(state.selectedOperationId)) || null;
+}
+
+function featureInstanceForOperation(data, operation) {
+  const instances = data?.feature_instances?.instances || data?.simulation_input?.feature_instances || [];
+  const featureType = String(operation?.feature_type || "");
+  const instanceId = operation?.feature_instance_id;
+  return (
+    instances.find((instance) => {
+      if (String(instance.type || "") !== featureType) return false;
+      return String(instance.instance_id) === String(instanceId);
+    }) || null
+  );
+}
+
+function voxelToViewer(point, transform) {
+  const center = transform?.center_voxel || [31.5, 31.5, 31.5];
+  const scale = Number(transform?.scale_mm_per_voxel || 1);
+  return [
+    (Number(point[0]) - center[0]) * scale,
+    (Number(point[1]) - center[1]) * scale,
+    (Number(point[2]) - center[2]) * scale,
+  ];
+}
+
+function instanceViewerBounds(data, instance) {
+  const bbox = instance?.bbox_voxel;
+  const transform = data?.voxel_points?.transform || data?.surface_points?.transform;
+  if (!bbox || bbox.length !== 2 || !transform) return null;
+  const v0 = voxelToViewer(bbox[0], transform);
+  const v1 = voxelToViewer(bbox[1], transform);
+  const mins = [0, 1, 2].map((i) => Math.min(v0[i], v1[i]));
+  const maxs = [0, 1, 2].map((i) => Math.max(v0[i], v1[i]));
+  const size = [0, 1, 2].map((i) => Math.max(0.8, maxs[i] - mins[i]));
+  const center = [0, 1, 2].map((i) => (mins[i] + maxs[i]) / 2);
+  const centroid = instance.centroid_voxel ? voxelToViewer(instance.centroid_voxel, transform) : center;
+  return { center, size, centroid };
+}
+
+function stockBounds(data) {
+  const bbox = data?.metadata?.bounding_box_mm || {};
+  const size = [Number(bbox.x || 1), Number(bbox.y || 1), Number(bbox.z || 1)];
+  return {
+    size,
+    center: [0, 0, 0],
+    topCenter: [0, 0, size[2] / 2],
+    topZ: size[2] / 2,
+  };
+}
+
+function addBoxHighlight(group, bounds, color, review = false) {
+  const boxGeometry = new THREE.BoxGeometry(bounds.size[0], bounds.size[1], bounds.size[2]);
+  const fill = new THREE.Mesh(
+    boxGeometry,
+    new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: review ? 0.13 : 0.16,
+      depthWrite: false,
+    }),
+  );
+  fill.position.set(...bounds.center);
+  group.add(fill);
+
+  const edges = new THREE.LineSegments(
+    new THREE.EdgesGeometry(boxGeometry),
+    new THREE.LineBasicMaterial({ color, transparent: true, opacity: review ? 0.95 : 1 }),
+  );
+  edges.position.copy(fill.position);
+  group.add(edges);
+}
+
+function addTopFaceHighlight(group, data, color, review = false) {
+  const stock = stockBounds(data);
+  const z = stock.topZ + 0.12;
+  const plane = new THREE.Mesh(
+    new THREE.PlaneGeometry(stock.size[0], stock.size[1]),
+    new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: review ? 0.16 : 0.22,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }),
+  );
+  plane.position.set(0, 0, z);
+  group.add(plane);
+
+  const outlineGeometry = new THREE.BoxGeometry(stock.size[0], stock.size[1], 0.2);
+  const outline = new THREE.LineSegments(
+    new THREE.EdgesGeometry(outlineGeometry),
+    new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.9 }),
+  );
+  outline.position.set(0, 0, z);
+  group.add(outline);
+  return { center: [0, 0, z], size: [stock.size[0], stock.size[1], 0.2], centroid: [0, 0, z] };
+}
+
+function addTargetMarker(group, target, color, scale = 1) {
+  const marker = new THREE.Mesh(
+    new THREE.SphereGeometry(Math.max(0.8, scale), 16, 12),
+    new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.45, roughness: 0.35 }),
+  );
+  marker.position.set(...target);
+  group.add(marker);
+
+  const ring = new THREE.Mesh(
+    new THREE.TorusGeometry(Math.max(1.8, scale * 2.2), Math.max(0.08, scale * 0.12), 8, 28),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9 }),
+  );
+  ring.position.set(...target);
+  group.add(ring);
+}
+
+function addApproachArrow(group, target, data, color) {
+  const stock = stockBounds(data);
+  const start = new THREE.Vector3(target[0], target[1], stock.topZ + Math.max(18, stock.size[2] * 0.9));
+  const end = new THREE.Vector3(...target);
+  const direction = new THREE.Vector3().subVectors(end, start);
+  const length = direction.length();
+  if (length <= 0) return;
+  group.add(new THREE.ArrowHelper(direction.normalize(), start, length, color, Math.max(3, length * 0.18), Math.max(1.4, length * 0.08)));
+}
+
+function addToolGhost(group, operation, target, bounds, color) {
+  const toolDiameter = Math.max(1, Number(operation?.tool_diameter_mm || 6));
+  const operationType = String(operation?.operation_type || "");
+  const featureType = String(operation?.feature_type || "");
+  const radius = Math.max(0.8, Math.min(toolDiameter / 2, 18));
+  const material = new THREE.MeshStandardMaterial({
+    color,
+    emissive: color,
+    emissiveIntensity: 0.18,
+    roughness: 0.3,
+    transparent: true,
+    opacity: 0.42,
+    depthWrite: false,
+  });
+
+  if (operationType.includes("face_mill") || featureType === "flat_face") {
+    const cutter = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, 2.0, 36), material);
+    cutter.rotation.x = Math.PI / 2;
+    cutter.position.set(target[0], target[1], target[2] + 5);
+    group.add(cutter);
+    return;
+  }
+
+  if (operationType.includes("centre_drill")) {
+    const cone = new THREE.Mesh(new THREE.ConeGeometry(radius, Math.max(4, radius * 2.4), 28), material);
+    cone.rotation.x = Math.PI;
+    cone.position.set(target[0], target[1], target[2] + Math.max(2, radius));
+    group.add(cone);
+    return;
+  }
+
+  const length = Math.max(bounds?.size?.[2] || 8, Number(operation?.cut_depth_mm || 0), 8);
+  const cutter = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, length, 28), material);
+  cutter.rotation.x = Math.PI / 2;
+  cutter.position.set(target[0], target[1], target[2] + length / 2);
+  group.add(cutter);
+}
+
+function createOperationOverlay(data, operation) {
+  if (!data || !operation) return null;
+  const group = new THREE.Group();
+  const instance = featureInstanceForOperation(data, operation);
+  const review = Boolean(operation.requires_review || instance?.localisation_status === "estimated" || instance?.localisation_status === "unknown");
+  const color = review ? 0xf2b84b : 0x58d0ff;
+  const operationType = String(operation.operation_type || "");
+  const featureType = String(operation.feature_type || "");
+
+  let bounds = null;
+  if (operationType.includes("face_mill") || featureType === "flat_face") {
+    bounds = addTopFaceHighlight(group, data, color, review);
+  } else if (instance) {
+    bounds = instanceViewerBounds(data, instance);
+    if (bounds) addBoxHighlight(group, bounds, color, review);
+  }
+
+  if (!bounds) {
+    const stock = stockBounds(data);
+    bounds = {
+      center: stock.topCenter,
+      size: [Math.max(6, stock.size[0] * 0.18), Math.max(6, stock.size[1] * 0.18), Math.max(2, stock.size[2] * 0.12)],
+      centroid: stock.topCenter,
+    };
+    addBoxHighlight(group, bounds, color, true);
+  }
+
+  const target = bounds.centroid || bounds.center;
+  addTargetMarker(group, target, color, operationType.includes("centre_drill") ? 1.5 : 1.1);
+  addApproachArrow(group, target, data, color);
+  addToolGhost(group, operation, target, bounds, color);
+  group.userData = { operation, instance, review };
+  return group;
+}
+
+function updateOperationOverlay() {
+  clearObject(state.operationObject);
+  state.operationObject = null;
+  const operation = selectedOperation();
+  if (!operation || !state.viewerData) return;
+  state.operationObject = createOperationOverlay(state.viewerData, operation);
+  if (state.operationObject) scene.add(state.operationObject);
+}
+
 async function loadMesh(jobId, meshUrl) {
   if (!meshUrl) return null;
   return new Promise((resolve, reject) => {
@@ -198,11 +416,13 @@ async function renderViewer(data) {
   clearObject(state.surfaceObject);
   clearObject(state.featureObject);
   clearObject(state.approachObject);
+  clearObject(state.operationObject);
   state.meshObject = null;
   state.voxelObject = null;
   state.surfaceObject = null;
   state.featureObject = null;
   state.approachObject = null;
+  state.operationObject = null;
 
   state.voxelObject = pointsToCloud(data.voxel_points, 0x54b7a7, 0.55, 0.14);
   state.voxelObject.visible = state.voxelsVisible;
@@ -237,6 +457,7 @@ async function renderViewer(data) {
     camera.far = radius * 20;
     camera.updateProjectionMatrix();
   }
+  updateOperationOverlay();
 }
 
 function renderJobs() {
@@ -350,22 +571,37 @@ function renderSimulation(data) {
 }
 
 function renderOperations(data) {
-  const operations = data.simulation_input?.operations || data.process_plan?.operations || [];
-  els.operationList.innerHTML = operations.length
-    ? operations
-        .slice(0, 40)
-        .map(
-          (op) => `
-          <div class="operation-item">
-            <div class="operation-title"><strong>${op.operation_id || op.step}. ${op.operation_type}</strong><span>${op.approach_direction}</span></div>
-            <div class="meta">${op.feature_type} · ${op.tool_type} · ${op.phase}</div>
-            <div class="meta">instance ${text(op.feature_instance_id, "n/a")} · tool Ø ${text(op.tool_diameter_mm, "n/a")} mm · depth ${text(op.cut_depth_mm, "n/a")} mm</div>
-            ${op.requires_review ? '<div class="operation-review">Needs review</div>' : ""}
-          </div>
-        `,
-        )
-        .join("")
-    : '<div class="empty">No operations available.</div>';
+  const operations = getOperations(data);
+  els.operationList.innerHTML = "";
+  if (!operations.length) {
+    state.selectedOperationId = null;
+    els.operationList.innerHTML = '<div class="empty">No operations available.</div>';
+    updateOperationOverlay();
+    return;
+  }
+
+  if (!state.selectedOperationId || !operations.some((op) => operationKey(op) === String(state.selectedOperationId))) {
+    state.selectedOperationId = operationKey(operations[0]);
+  }
+
+  operations.slice(0, 40).forEach((op) => {
+    const key = operationKey(op);
+    const node = document.createElement("button");
+    node.type = "button";
+    node.className = `operation-item ${key === String(state.selectedOperationId) ? "active" : ""} ${op.requires_review ? "review" : ""}`;
+    node.innerHTML = `
+      <div class="operation-title"><strong>${op.operation_id || op.step}. ${op.operation_type}</strong><span>${op.approach_direction}</span></div>
+      <div class="meta">${op.feature_type} · ${op.tool_type} · ${op.phase}</div>
+      <div class="meta">instance ${text(op.feature_instance_id, "n/a")} · tool Ø ${text(op.tool_diameter_mm, "n/a")} mm · depth ${text(op.cut_depth_mm, "n/a")} mm</div>
+      ${op.requires_review ? '<div class="operation-review">Needs review</div>' : ""}
+    `;
+    node.addEventListener("click", () => {
+      state.selectedOperationId = key;
+      renderOperations(data);
+    });
+    els.operationList.appendChild(node);
+  });
+  updateOperationOverlay();
 }
 
 async function refreshJobs() {
@@ -379,6 +615,7 @@ async function refreshJobs() {
 
 async function loadJob(jobId) {
   state.activeJob = jobId;
+  state.selectedOperationId = null;
   els.activeJob.textContent = jobId;
   renderJobs();
   const data = await api(`/api/jobs/${encodeURIComponent(jobId)}/viewer-data`);

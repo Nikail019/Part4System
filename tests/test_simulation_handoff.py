@@ -154,3 +154,24 @@ def test_generate_simulation_input_reviews_missing_instance_reference(tmp_path):
 
     assert result["readiness"]["recommendation"] == "REVIEW"
     assert "OPERATION_INSTANCE_NOT_FOUND" in result["readiness"]["review_codes"]
+
+
+def test_generate_simulation_input_reviews_operation_review_flag(tmp_path):
+    paths = base_inputs(tmp_path)
+    plan = json.loads((tmp_path / "process_plan.json").read_text())
+    plan["operations"][0]["requires_review"] = True
+    plan["operations"][0]["feature_type"] = "boss"
+    write_json(tmp_path / "process_plan.json", plan)
+
+    result = generate_simulation_input(
+        paths["metadata"],
+        paths["features"],
+        paths["feature_instances"],
+        paths["setup_analysis"],
+        paths["process_plan"],
+        str(tmp_path),
+        pmi_data_path=paths["pmi_data"],
+    )
+
+    assert result["readiness"]["recommendation"] == "REVIEW"
+    assert "SIM_OPERATION_REQUIRES_REVIEW" in result["readiness"]["review_codes"]

@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+import phase1_voxeliser
 from phase1_voxeliser import process_step_file
 
 
@@ -177,3 +178,52 @@ def test_warnings_key_is_list(key, tmp_path):
     _require_fixtures()
     result = process_step_file(FIXTURES[key], str(tmp_path))
     assert isinstance(result["warnings"], list)
+
+
+def test_metre_declared_step_is_not_scaled_twice(monkeypatch, tmp_path):
+    step_path = tmp_path / "metre_declared.step"
+    step_path.write_text(
+        "\n".join(
+            [
+                "ISO-10303-21;",
+                "DATA;",
+                "#1=(",
+                "LENGTH_UNIT()",
+                "NAMED_UNIT(*)",
+                "SI_UNIT($,.METRE.)",
+                ");",
+                "ENDSEC;",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_parser(step_path, stl_path):
+        Path(stl_path).write_text("solid fake\nendsolid fake\n", encoding="utf-8")
+        return {
+            "xmin": -30.0,
+            "xmax": 30.0,
+            "ymin": -50.0,
+            "ymax": 50.0,
+            "zmin": 0.0,
+            "zmax": 25.0,
+            "volume": 126126.5,
+            "surface_area": 22048.6,
+            "mesh_face_count": 100,
+        }
+
+    def fake_voxelise(stl_path, resolution):
+        grid = np.zeros((resolution, resolution, resolution), dtype=bool)
+        grid[resolution // 2, resolution // 2, resolution // 2] = True
+        return grid, True
+
+    monkeypatch.setattr(phase1_voxeliser, "_STEP_BACKEND", "cadquery")
+    monkeypatch.setattr(phase1_voxeliser, "_parse_step_cadquery", fake_parser)
+    monkeypatch.setattr(phase1_voxeliser, "_voxelise_mesh", fake_voxelise)
+
+    result = phase1_voxeliser.process_step_file(str(step_path), str(tmp_path / "out"))
+
+    assert result["source_unit"] == "M"
+    assert result["bounding_box_mm"] == {"x": 60.0, "y": 100.0, "z": 25.0}
+    assert result["volume_mm3"] == 126126.5
+    assert any("normalised geometry to millimetres" in item for item in result["warnings"])

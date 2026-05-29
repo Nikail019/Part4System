@@ -308,6 +308,27 @@ def generate_quotation(
     review_items = [
         item for item in process_plan.get("review_items", []) if isinstance(item, dict)
     ]
+    for operation in process_plan.get("operations", []):
+        if not isinstance(operation, dict) or not operation.get("requires_review"):
+            continue
+        feature_type = str(operation.get("feature_type", "unknown"))
+        if feature_type == "flat_face":
+            continue
+        review_items.append(
+            {
+                "code": "OPERATION_REQUIRES_REVIEW",
+                "severity": "review",
+                "message": (
+                    f"Operation {operation.get('operation_id', operation.get('step'))} "
+                    f"for {feature_type} instance {operation.get('feature_instance_id')} "
+                    "requires review."
+                ),
+                "source": "process_plan",
+                "operation_id": operation.get("operation_id", operation.get("step")),
+                "feature_type": feature_type,
+                "instance_id": operation.get("feature_instance_id"),
+            }
+        )
     review_flags: list[str] = [str(item.get("message")) for item in review_items if item.get("message")]
     if process_plan.get("two_point_five_d_compatible") is False:
         review_flags.append("Part violates the single-setup +Z 2.5D machining baseline.")
